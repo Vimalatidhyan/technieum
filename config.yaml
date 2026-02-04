@@ -1,0 +1,227 @@
+# ReconX Configuration File
+# Customize settings for reconnaissance operations
+
+# General Settings
+general:
+  output_dir: "output"
+  database: "reconx.db"
+  threads: 5
+  timeout: 3600  # Timeout per phase in seconds
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+# API Keys (Can also be set via environment variables)
+api_keys:
+  shodan: "${SHODAN_API_KEY}"
+  censys_id: "${CENSYS_API_ID}"
+  censys_secret: "${CENSYS_API_SECRET}"
+  github: "${GITHUB_TOKEN}"
+  securitytrails: "${SECURITYTRAILS_API_KEY}"
+  pastebin: "${PASTEBIN_API_KEY}"
+
+# Phase 1: Discovery Settings
+phase1_discovery:
+  enabled: true
+
+  # Subdomain enumeration tools
+  subdomain_tools:
+    - sublist3r
+    - amass
+    - assetfinder
+    - subfinder
+    - subdominator
+    - crtsh
+    - securitytrails
+
+  # DNS resolution
+  dns_resolution:
+    enabled: true
+    tool: "dnsx"
+    timeout: 10
+
+  # HTTP validation
+  http_validation:
+    enabled: true
+    tool: "httpx"
+    threads: 50
+    timeout: 10
+    follow_redirects: true
+
+  # Active discovery
+  active_discovery:
+    enabled: false  # Set to true for DNS bruteforcing
+    wordlist: "/usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+
+# Phase 2: Intelligence Settings
+phase2_intel:
+  enabled: true
+
+  # Port scanning
+  port_scanning:
+    enabled: true
+    fast_scan: true  # RustScan
+    deep_scan: true  # Nmap
+    nmap_flags: "-sV -sC -T4 -Pn"
+    port_range: "1-65535"
+
+  # OSINT
+  osint:
+    shodan: true
+    censys: true
+    shodan_limit: 100
+
+  # Subdomain takeover
+  takeover_detection:
+    enabled: true
+    tool: "subjack"
+
+  # Repository scanning
+  repo_scanning:
+    enabled: true
+    gitleaks: true
+    trufflehog: true
+    max_repos: 10
+
+# Phase 3: Content Discovery Settings
+phase3_content:
+  enabled: true
+
+  # Archive crawling
+  archive_crawling:
+    enabled: true
+    tools:
+      - gau
+      - waybackurls
+      - hakrawler
+      - katana
+    max_urls: 10000
+
+  # Directory bruteforcing
+  directory_bruteforce:
+    enabled: true
+    tools:
+      - ffuf
+      - feroxbuster
+      - dirsearch
+    wordlist: "/usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt"
+    max_targets: 20  # Limit number of hosts to brute-force
+    threads: 50
+
+  # JavaScript analysis
+  js_analysis:
+    enabled: true
+    linkfinder: true
+    secretfinder: true
+    max_js_files: 100
+
+  # Pastebin monitoring
+  pastebin:
+    enabled: false
+    api_required: true
+
+  # API testing
+  api_testing:
+    enabled: true
+    newman: true
+    kiterunner: true
+    arjun: true
+
+# Phase 4: Vulnerability Scanning Settings
+phase4_vulnscan:
+  enabled: true
+
+  # Nuclei
+  nuclei:
+    enabled: true
+    severity: ["critical", "high", "medium", "low", "info"]
+    templates: "all"
+    rate_limit: 150
+    update_templates: true
+
+  # Trivy
+  trivy:
+    enabled: true
+    scan_repo: true
+    scan_images: true
+    scan_configs: true
+
+  # XSS scanning
+  xss:
+    enabled: true
+    tool: "dalfox"
+    max_urls: 100
+
+  # SQL injection
+  sqli:
+    enabled: true
+    tool: "sqlmap"
+    max_urls: 30
+    sqlmap_flags: "--batch --random-agent --level=1 --risk=1"
+
+  # CORS misconfiguration
+  cors:
+    enabled: true
+    tool: "corsy"
+
+  # Additional scanners
+  additional:
+    nikto: false
+    wpscan: true
+    wapiti: false
+    cmsmap: false
+    retirejs: true
+
+  # SSL/TLS scanning
+  ssl_tls:
+    enabled: true
+    tool: "testssl"
+    max_hosts: 10
+
+# Logging Settings
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "logs/reconx.log"
+  console: true
+
+# Output Settings
+output:
+  json: true
+  html_report: false
+  csv_export: false
+
+# Performance Settings
+performance:
+  max_memory: "4GB"
+  cache_enabled: true
+
+# Notification Settings (Optional)
+notifications:
+  enabled: false
+  slack_webhook: ""
+  discord_webhook: ""
+  email: ""
+
+# Filter Settings
+filters:
+  exclude_extensions:
+    - png
+    - jpg
+    - jpeg
+    - gif
+    - svg
+    - css
+    - woff
+    - woff2
+    - ttf
+    - eot
+    - ico
+
+  exclude_status_codes:
+    - 404
+    - 400
+    - 500
+    - 502
+    - 503
+
+  exclude_patterns:
+    - "logout"
+    - "signout"
