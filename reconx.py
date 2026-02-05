@@ -286,14 +286,6 @@ Attack Surface Management Framework
                 self.db.insert_vulnerabilities_bulk(target, vulns)
                 self.log_info(f"Inserted {len(vulns)} Nuclei vulnerabilities")
 
-        # Parse Trivy results
-        trivy_file = phase_dir / "trivy" / "trivy_all.json"
-        if trivy_file.exists():
-            vulns = self.vuln_parser.parse_trivy(str(trivy_file))
-            if vulns:
-                self.db.insert_vulnerabilities_bulk(target, vulns)
-                self.log_info(f"Inserted {len(vulns)} Trivy vulnerabilities")
-
         # Parse Dalfox (XSS) results
         dalfox_file = phase_dir / "xss" / "dalfox_results.txt"
         if dalfox_file.exists():

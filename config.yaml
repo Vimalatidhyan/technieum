@@ -137,13 +137,6 @@ phase4_vulnscan:
     rate_limit: 150
     update_templates: true
 
-  # Trivy
-  trivy:
-    enabled: true
-    scan_repo: true
-    scan_images: true
-    scan_configs: true
-
   # XSS scanning
   xss:
     enabled: true

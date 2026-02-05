@@ -45,6 +45,14 @@ THREADS="${RECONX_THREADS:-5}"
 SQLMAP_THREADS="${RECONX_SQLMAP_THREADS:-3}"
 TIMEOUT_DEFAULT="${RECONX_VULN_TIMEOUT:-1200}"
 
+# Sanitize concurrency values
+if ! [[ "$THREADS" =~ ^[0-9]+$ ]] || [ "$THREADS" -lt 1 ]; then
+    THREADS=5
+fi
+if ! [[ "$SQLMAP_THREADS" =~ ^[0-9]+$ ]] || [ "$SQLMAP_THREADS" -lt 1 ]; then
+    SQLMAP_THREADS=3
+fi
+
 export -f log_info
 export -f log_warn
 export -f log_error
@@ -65,7 +73,7 @@ run_parallel_from_file() {
         return 0
     fi
 
-    xargs -I{} -P "$parallelism" bash -c "$command" _ {} < "$input_file"
+    tr '\n' '\0' < "$input_file" | xargs -0 -I{} -P "$parallelism" bash -c "$command" _ "{}"
 }
 
 # Check prerequisites
@@ -143,52 +151,7 @@ else
 fi
 
 ################################################################################
-# PHASE 4B: TRIVY - CONFIGURATION & IMAGE SCANNING
-################################################################################
-
-log_info "=== TRIVY SCANNING ==="
-
-TRIVY_DIR="$PHASE_DIR/trivy"
-mkdir -p "$TRIVY_DIR"
-
-if command -v trivy &> /dev/null; then
-    log_info "Running Trivy..."
-
-    # Scan current directory for misconfigurations
-    if [ -d ".git" ]; then
-        log_info "Trivy: Scanning repository for misconfigurations..."
-        run_with_timeout "$TIMEOUT_DEFAULT" "trivy fs --scanners config,secret --format json --output \"$TRIVY_DIR/trivy_repo_config.json\" ." || log_warn "Trivy repo scan failed"
-    fi
-
-    # Scan for vulnerabilities in dependencies if package files exist
-    for pkg_file in package.json requirements.txt Gemfile go.mod pom.xml; do
-        if [ -f "$pkg_file" ]; then
-            log_info "Trivy: Scanning $pkg_file..."
-            run_with_timeout "$TIMEOUT_DEFAULT" "trivy fs --scanners vuln --format json --output \"$TRIVY_DIR/trivy_${pkg_file//[^a-zA-Z0-9]/_}.json\" ." || true
-        fi
-    done
-
-    # Scan Docker images if any are found
-    if command -v docker &> /dev/null; then
-        docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | head -n 10 | while IFS= read -r image; do
-            if [ ! -z "$image" ] && [ "$image" != "<none>:<none>" ]; then
-                log_info "Trivy: Scanning Docker image $image..."
-                run_with_timeout "$TIMEOUT_DEFAULT" "trivy image --format json --output \"$TRIVY_DIR/trivy_image_${image//[^a-zA-Z0-9]/_}.json\" \"$image\"" || true
-            fi
-        done
-    fi
-
-    # Merge Trivy results
-    cat "$TRIVY_DIR"/trivy_*.json 2>/dev/null > "$TRIVY_DIR/trivy_all.json" || touch "$TRIVY_DIR/trivy_all.json"
-
-    TRIVY_COUNT=$(cat "$TRIVY_DIR/trivy_all.json" | jq '[.Results[]?.Vulnerabilities[]?] | length' 2>/dev/null || echo "0")
-    log_info "Trivy vulnerabilities: $TRIVY_COUNT"
-else
-    log_warn "Trivy not found"
-fi
-
-################################################################################
-# PHASE 4C: XSS SCANNING - DALFOX
+# PHASE 4B: XSS SCANNING - DALFOX
 ################################################################################
 
 log_info "=== XSS SCANNING ==="
@@ -236,7 +199,7 @@ else
 fi
 
 ################################################################################
-# PHASE 4D: SQL INJECTION - SQLMAP
+# PHASE 4C: SQL INJECTION - SQLMAP
 ################################################################################
 
 log_info "=== SQL INJECTION SCANNING ==="
@@ -253,14 +216,18 @@ if command -v sqlmap &> /dev/null; then
 
         head -n 30 "$XSS_DIR/param_urls.txt" | awk 'NF' > "$SQLI_DIR/sqlmap_targets.txt"
 
+        mkdir -p "$SQLI_DIR/results"
         export SQLI_DIR SQLMAP_THREADS
         run_parallel_from_file "$SQLI_DIR/sqlmap_targets.txt" "$THREADS" '
             url="$1"
             log_info "SQLMap: $url"
+            out_file="$SQLI_DIR/results/sqlmap_${url//[^a-zA-Z0-9]/_}.txt"
             sqlmap -u "$url" --batch --random-agent --level=1 --risk=1 \
                 --output-dir="$SQLI_DIR" --flush-session --threads="$SQLMAP_THREADS" \
-                >> "$SQLI_DIR/sqlmap_results.txt" 2>&1 || true
+                > "$out_file" 2>&1 || true
         '
+
+        cat "$SQLI_DIR"/results/sqlmap_*.txt 2>/dev/null > "$SQLI_DIR/sqlmap_results.txt" || touch "$SQLI_DIR/sqlmap_results.txt"
 
         SQLI_COUNT=$(grep -c "vulnerable" "$SQLI_DIR/sqlmap_results.txt" 2>/dev/null || echo "0")
         log_info "SQLMap vulnerabilities: $SQLI_COUNT"
@@ -272,7 +239,7 @@ else
 fi
 
 ################################################################################
-# PHASE 4E: CORS MISCONFIGURATION - CORSY
+# PHASE 4D: CORS MISCONFIGURATION - CORSY
 ################################################################################
 
 log_info "=== CORS MISCONFIGURATION SCANNING ==="
@@ -300,7 +267,7 @@ else
 fi
 
 ################################################################################
-# PHASE 4F: ADDITIONAL VULNERABILITY SCANNERS
+# PHASE 4E: ADDITIONAL VULNERABILITY SCANNERS
 ################################################################################
 
 log_info "=== ADDITIONAL SCANNERS ==="
@@ -395,14 +362,16 @@ if command -v retire &> /dev/null; then
     export MISC_DIR
     run_parallel_from_file "$MISC_DIR/retire_targets.txt" "$THREADS" '
         js_url="$1"
-        retire --jspath "$js_url" --outputformat json >> "$MISC_DIR/retirejs_results.json" 2>/dev/null || true
+        retire --jspath "$js_url" --outputformat json > "$MISC_DIR/retirejs_${js_url//[^a-zA-Z0-9]/_}.json" 2>/dev/null || true
     '
+
+    cat "$MISC_DIR"/retirejs_*.json 2>/dev/null > "$MISC_DIR/retirejs_results.json" || touch "$MISC_DIR/retirejs_results.json"
 else
     log_warn "Retire.js not found"
 fi
 
 ################################################################################
-# PHASE 4G: SSL/TLS SCANNING
+# PHASE 4F: SSL/TLS SCANNING
 ################################################################################
 
 log_info "=== SSL/TLS SECURITY SCANNING ==="
@@ -460,14 +429,12 @@ echo "URLs Scanned: $SCAN_COUNT"
 echo ""
 echo "Vulnerability Findings:"
 echo "  - Nuclei: ${NUCLEI_COUNT:-0}"
-echo "  - Trivy: ${TRIVY_COUNT:-0}"
 echo "  - Dalfox (XSS): ${DALFOX_COUNT:-0}"
 echo "  - SQLMap (SQLi): ${SQLI_COUNT:-0}"
 echo "  - Corsy (CORS): ${CORS_COUNT:-0}"
 echo ""
 echo "Output directories:"
 echo "  - $NUCLEI_DIR: Nuclei results"
-echo "  - $TRIVY_DIR: Trivy configuration/image scans"
 echo "  - $XSS_DIR: XSS vulnerability results"
 echo "  - $SQLI_DIR: SQL injection results"
 echo "  - $CORS_DIR: CORS misconfiguration results"
