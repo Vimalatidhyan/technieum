@@ -104,7 +104,12 @@ run_shodanx_mode() {
     return 0
 }
 
-# Check if alive hosts exist from Phase 1
+# Check if alive hosts exist from Phase 1 (fallback to resolved subdomains)
+if [ ! -s "$PHASE1_DIR/alive_hosts.txt" ] && [ -f "$PHASE1_DIR/resolved_subdomains.txt" ]; then
+    log_warn "alive_hosts.txt missing/empty; using resolved_subdomains as fallback"
+    cp "$PHASE1_DIR/resolved_subdomains.txt" "$PHASE1_DIR/alive_hosts.txt" 2>/dev/null || true
+fi
+
 if [ ! -f "$PHASE1_DIR/alive_hosts.txt" ]; then
     log_error "Phase 1 output not found. Run Phase 1 first!"
     exit 1

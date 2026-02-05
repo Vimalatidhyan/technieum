@@ -105,6 +105,16 @@ Attack Surface Management Framework
         print(f"{Colors.BOLD}{Colors.BLUE}{phase}{Colors.END}")
         print(f"{Colors.BOLD}{Colors.BLUE}{'='*70}{Colors.END}\n")
 
+    def phase1_outputs_ok(self, target_dir: Path) -> bool:
+        """Check required Phase 1 outputs exist before skipping."""
+        phase_dir = target_dir / "phase1_discovery"
+        required_files = [
+            "all_subdomains.txt",
+            "resolved_subdomains.txt",
+            "alive_hosts.txt",
+        ]
+        return all((phase_dir / filename).exists() for filename in required_files)
+
     def run_module(self, module_script: str, target: str, output_dir: Path, timeout: int | None = None) -> bool:
         """Execute a bash module script"""
         script_path = self.modules_dir / module_script
@@ -337,6 +347,11 @@ Attack Surface Management Framework
             # Phase 1: Discovery
             if 1 in phases:
                 progress = self.db.get_progress(target)
+                if progress and progress['phase1_done'] and not self.phase1_outputs_ok(target_dir):
+                    self.log_warn("Phase 1 marked complete but outputs missing; rerunning...")
+                    self.db.update_phase(target, 1, False)
+                    progress = None
+
                 if progress and progress['phase1_done']:
                     self.log_warn("Phase 1 already completed, skipping...")
                 else:
