@@ -40,6 +40,25 @@ log_warn() {
     echo -e "${YELLOW}[!]${NC} $1"
 }
 
+safe_cat() {
+    local output_file="$1"
+    shift
+
+    > "$output_file"
+
+    for file in "$@"; do
+        if [ -f "$file" ] && [ -s "$file" ]; then
+            cat "$file" >> "$output_file" 2>/dev/null || true
+        fi
+    done
+
+    return 0
+}
+
+safe_grep() {
+    grep "$@" || true
+}
+
 # Concurrency controls
 THREADS="${RECONX_THREADS:-5}"
 SQLMAP_THREADS="${RECONX_SQLMAP_THREADS:-3}"
@@ -142,7 +161,7 @@ if command -v nuclei &> /dev/null && [ "$SCAN_COUNT" -gt 0 ]; then
         -o "$NUCLEI_DIR/nuclei_misconfig.json" 2>/dev/null || log_warn "Nuclei misconfig scan failed"
 
     # Merge all Nuclei results
-    cat "$NUCLEI_DIR"/nuclei_*.json 2>/dev/null > "$NUCLEI_DIR/nuclei_all.json" || touch "$NUCLEI_DIR/nuclei_all.json"
+    safe_cat "$NUCLEI_DIR/nuclei_all.json" "$NUCLEI_DIR"/nuclei_*.json
 
     NUCLEI_COUNT=$(cat "$NUCLEI_DIR/nuclei_all.json" | jq -s 'length' 2>/dev/null || echo "0")
     log_info "Nuclei findings: $NUCLEI_COUNT"
@@ -166,7 +185,7 @@ if command -v dalfox &> /dev/null; then
     # Use URLs from Phase 3 with parameters
     if [ -f "$PHASE3_DIR/urls/all_urls.txt" ]; then
         # Filter URLs with parameters
-        grep -E '\?.*=' "$PHASE3_DIR/urls/all_urls.txt" 2>/dev/null | head -n 100 > "$XSS_DIR/param_urls.txt" || touch "$XSS_DIR/param_urls.txt"
+        safe_grep -E '\?.*=' "$PHASE3_DIR/urls/all_urls.txt" | head -n 100 > "$XSS_DIR/param_urls.txt"
 
         if [ -s "$XSS_DIR/param_urls.txt" ]; then
             log_info "Testing $(wc -l < "$XSS_DIR/param_urls.txt" | tr -d ' ') URLs with parameters..."

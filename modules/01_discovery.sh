@@ -212,22 +212,34 @@ else
     ((TOOLS_SKIPPED++))
 fi
 
-# 5. SubDominator
-if command -v subdominator &> /dev/null || [ -f "/opt/SubDominator/SubDominator.py" ]; then
-    log_info "Launching SubDominator..."
+# 5. Subdominator (RevoltSecurities)
+SUBDOMINATOR_PY=""
+for candidate in \
+    "/opt/Subdominator/subdominator.py" \
+    "/opt/Subdominator/Subdominator.py" \
+    "/opt/SubDominator/subdominator.py" \
+    "/opt/SubDominator/SubDominator.py"; do
+    if [ -f "$candidate" ]; then
+        SUBDOMINATOR_PY="$candidate"
+        break
+    fi
+done
+
+if command -v subdominator &> /dev/null || [ -n "$SUBDOMINATOR_PY" ]; then
+    log_info "Launching Subdominator..."
     (
         timeout 600 bash -c "
-            if [ -f '/opt/SubDominator/SubDominator.py' ]; then
-                python3 /opt/SubDominator/SubDominator.py -d '$TARGET' -o '$TEMP_SUBS/subdominator.txt'
+            if command -v subdominator &> /dev/null; then
+                subdominator -d '$TARGET' -o '$TEMP_SUBS/subdominator.txt' -nc
             else
-                subdominator -d '$TARGET' -o '$TEMP_SUBS/subdominator.txt'
+                python3 '$SUBDOMINATOR_PY' -d '$TARGET' -o '$TEMP_SUBS/subdominator.txt' -nc
             fi
         " 2>/dev/null || touch "$TEMP_SUBS/subdominator.txt"
     ) &
     tool_pids[subdominator]=$!
     pids+=($!)
 else
-    log_warn "SubDominator not found"
+    log_warn "Subdominator not found"
     ((TOOLS_SKIPPED++))
 fi
 
@@ -298,12 +310,22 @@ log_info "=== ACTIVE SUBDOMAIN DISCOVERY ==="
 # Only run active discovery if we have some passive results
 if [ "$PASSIVE_COUNT" -gt 0 ] || [ -s "$PHASE_DIR/passive_subdomains.txt" ]; then
     # 8. Dnsbruter (DNS bruteforcing)
+    DNSBRUTER_PY=""
+    for candidate in \
+        "/opt/Dnsbruter/dnsbruter.py" \
+        "/opt/dnsbruter/dnsbruter.py"; do
+        if [ -f "$candidate" ]; then
+            DNSBRUTER_PY="$candidate"
+            break
+        fi
+    done
+
     if command -v dnsbruter &> /dev/null; then
         run_tool "dnsbruter" "$TEMP_SUBS/dnsbruter.txt" 900 \
-            "dnsbruter -d '$TARGET' -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt -o '$TEMP_SUBS/dnsbruter.txt'" || true
-    elif [ -f "/opt/dnsbruter/dnsbruter.py" ]; then
+            "dnsbruter -d '$TARGET' -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt -wd -o '$TEMP_SUBS/dnsbruter.txt'" || true
+    elif [ -n "$DNSBRUTER_PY" ]; then
         log_info "Running Dnsbruter (Python)..."
-        timeout 900 python3 /opt/dnsbruter/dnsbruter.py -d "$TARGET" -o "$TEMP_SUBS/dnsbruter.txt" 2>/dev/null || log_warn "Dnsbruter failed"
+        timeout 900 python3 "$DNSBRUTER_PY" -d "$TARGET" -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt -wd -o "$TEMP_SUBS/dnsbruter.txt" 2>/dev/null || log_warn "Dnsbruter failed"
     else
         log_warn "Dnsbruter not found"
         ((TOOLS_SKIPPED++))

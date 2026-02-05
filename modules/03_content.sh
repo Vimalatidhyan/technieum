@@ -4,7 +4,8 @@
 # Crawling, Archives, Directory Bruting, JS Analysis, Pastebin
 ################################################################################
 
-set -e
+# Do not fail-fast; continue even if some tools error
+set -o pipefail
 TARGET="$1"
 OUTPUT_DIR="$2"
 
@@ -36,6 +37,25 @@ log_error() {
 
 log_warn() {
     echo -e "${YELLOW}[!]${NC} $1"
+}
+
+safe_cat() {
+    local output_file="$1"
+    shift
+
+    > "$output_file"
+
+    for file in "$@"; do
+        if [ -f "$file" ] && [ -s "$file" ]; then
+            cat "$file" >> "$output_file" 2>/dev/null || true
+        fi
+    done
+
+    return 0
+}
+
+safe_grep() {
+    grep "$@" || true
 }
 
 # Check if alive hosts exist from Phase 1
@@ -88,25 +108,56 @@ else
     log_warn "waybackurls not found"
 fi
 
-# 3. SpideyX (gospider wrapper)
+# 3. SpideyX (Revolt suite)
+if command -v spideyx &> /dev/null; then
+    log_info "Launching SpideyX crawler..."
+    (
+        SPIDEYX_CMD=""
+        if spideyx crawler -h 2>&1 | grep -qi "usage"; then
+            SPIDEYX_CMD="crawler"
+        elif spideyx crawl -h 2>&1 | grep -qi "usage"; then
+            SPIDEYX_CMD="crawl"
+        fi
+
+        if [ -z "$SPIDEYX_CMD" ]; then
+            log_warn "SpideyX crawler mode not available"
+            touch "$URLS_DIR/spideyx.txt"
+            exit 0
+        fi
+
+        SPIDEYX_TARGETS="$URLS_DIR/spideyx_targets.txt"
+        cat "$ALIVE_HOSTS" | sed 's|^|https://|' > "$SPIDEYX_TARGETS"
+
+        if cat "$SPIDEYX_TARGETS" | spideyx "$SPIDEYX_CMD" 2>/dev/null > "$URLS_DIR/spideyx_raw.txt"; then
+            safe_grep -oP 'https?://[^\s]+' "$URLS_DIR/spideyx_raw.txt" | sort -u > "$URLS_DIR/spideyx.txt"
+        else
+            touch "$URLS_DIR/spideyx.txt"
+        fi
+    ) &
+    pids+=($!)
+else
+    log_warn "SpideyX not found"
+fi
+
+# 4. Gospider (fallback crawler)
 if command -v gospider &> /dev/null; then
-    log_info "Launching SpideyX/gospider..."
+    log_info "Launching gospider..."
     (
         while IFS= read -r host; do
             url="https://$host"
             gospider -s "$url" -d 3 -c 10 -t 10 --sitemap --robots \
-                >> "$URLS_DIR/spideyx_raw.txt" 2>/dev/null || true
+                >> "$URLS_DIR/gospider_raw.txt" 2>/dev/null || true
         done < "$ALIVE_HOSTS"
 
         # Parse gospider output
-        grep -oP 'https?://[^\s]+' "$URLS_DIR/spideyx_raw.txt" 2>/dev/null | sort -u > "$URLS_DIR/spideyx.txt" || touch "$URLS_DIR/spideyx.txt"
+        safe_grep -oP 'https?://[^\s]+' "$URLS_DIR/gospider_raw.txt" | sort -u > "$URLS_DIR/gospider.txt"
     ) &
     pids+=($!)
 else
-    log_warn "gospider/SpideyX not found"
+    log_warn "gospider not found"
 fi
 
-# 4. Hakrawler
+# 5. Hakrawler
 if command -v hakrawler &> /dev/null; then
     log_info "Launching hakrawler..."
     (
@@ -118,7 +169,7 @@ else
     log_warn "hakrawler not found"
 fi
 
-# 5. Katana (ProjectDiscovery)
+# 6. Katana (ProjectDiscovery)
 if command -v katana &> /dev/null; then
     log_info "Launching Katana..."
     (
@@ -139,16 +190,32 @@ done
 # Merge all URLs
 log_info "Merging discovered URLs..."
 cat "$URLS_DIR"/*.txt 2>/dev/null | \
-    grep -E '^https?://' | \
+    safe_grep -E '^https?://' | \
     sort -u > "$URLS_DIR/all_urls.txt"
 
 URL_COUNT=$(wc -l < "$URLS_DIR/all_urls.txt" 2>/dev/null | tr -d ' ')
 log_info "Total unique URLs discovered: $URL_COUNT"
 
 # Filter URLs by extension for further analysis
-grep -E '\.(js|json)' "$URLS_DIR/all_urls.txt" > "$URLS_DIR/javascript_files.txt" 2>/dev/null || touch "$URLS_DIR/javascript_files.txt"
+safe_grep -E '\.(js|json)' "$URLS_DIR/all_urls.txt" > "$URLS_DIR/javascript_files.txt"
 JS_COUNT=$(wc -l < "$URLS_DIR/javascript_files.txt" 2>/dev/null | tr -d ' ')
 log_info "JavaScript files found: $JS_COUNT"
+
+# SpideyX JS scraping
+if command -v spideyx &> /dev/null && [ -s "$URLS_DIR/javascript_files.txt" ]; then
+    log_info "Running SpideyX JS scraper..."
+    (
+        if spideyx jsscrapy -h 2>&1 | grep -qi "usage"; then
+            cat "$URLS_DIR/javascript_files.txt" | spideyx jsscrapy 2>/dev/null > "$URLS_DIR/spideyx_jsscrapy.txt" || touch "$URLS_DIR/spideyx_jsscrapy.txt"
+        else
+            log_warn "SpideyX jsscrapy mode not available"
+            touch "$URLS_DIR/spideyx_jsscrapy.txt"
+        fi
+    )
+else
+    log_warn "SpideyX not found or no JavaScript URLs for scraping"
+    touch "$URLS_DIR/spideyx_jsscrapy.txt"
+fi
 
 ################################################################################
 # PHASE 3B: ACTIVE DIRECTORY/FILE BRUTE-FORCING

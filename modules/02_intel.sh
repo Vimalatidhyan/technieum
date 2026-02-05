@@ -4,8 +4,8 @@
 # Port scanning, OSINT, Takeover detection, Repo leaks
 ################################################################################
 
-# DO NOT use set -e - we want to continue even if tools fail
-set -o pipefail  # Catch errors in pipelines
+# Do not fail-fast; continue even if some tools error
+set -o pipefail
 TARGET="$1"
 OUTPUT_DIR="$2"
 
@@ -39,6 +39,71 @@ log_warn() {
     echo -e "${YELLOW}[!]${NC} $1"
 }
 
+safe_cat() {
+    local output_file="$1"
+    shift
+
+    > "$output_file"
+
+    for file in "$@"; do
+        if [ -f "$file" ] && [ -s "$file" ]; then
+            cat "$file" >> "$output_file" 2>/dev/null || true
+        fi
+    done
+
+    return 0
+}
+
+safe_grep() {
+    grep "$@" || true
+}
+
+run_shodanx_mode() {
+    local mode="$1"
+    local out_file="$2"
+    local help_text
+
+    help_text="$(shodanx "$mode" -h 2>&1 || true)"
+    if [ -z "$help_text" ]; then
+        return 1
+    fi
+
+    local target_flag=""
+    local output_flag=""
+
+    if echo "$help_text" | grep -q -- "--domain"; then
+        target_flag="--domain"
+    elif echo "$help_text" | grep -q -- " -d"; then
+        target_flag="-d"
+    elif echo "$help_text" | grep -q -- "--target"; then
+        target_flag="--target"
+    elif echo "$help_text" | grep -q -- " -t"; then
+        target_flag="-t"
+    fi
+
+    if echo "$help_text" | grep -q -- "--output"; then
+        output_flag="--output"
+    elif echo "$help_text" | grep -q -- " -o"; then
+        output_flag="-o"
+    fi
+
+    if [ -n "$output_flag" ]; then
+        if [ -n "$target_flag" ]; then
+            shodanx "$mode" "$target_flag" "$TARGET" "$output_flag" "$out_file" 2>/dev/null || return 1
+        else
+            shodanx "$mode" "$TARGET" "$output_flag" "$out_file" 2>/dev/null || return 1
+        fi
+    else
+        if [ -n "$target_flag" ]; then
+            shodanx "$mode" "$target_flag" "$TARGET" > "$out_file" 2>/dev/null || return 1
+        else
+            shodanx "$mode" "$TARGET" > "$out_file" 2>/dev/null || return 1
+        fi
+    fi
+
+    return 0
+}
+
 # Check if alive hosts exist from Phase 1
 if [ ! -f "$PHASE1_DIR/alive_hosts.txt" ]; then
     log_error "Phase 1 output not found. Run Phase 1 first!"
@@ -59,21 +124,42 @@ fi
 log_info "=== LIVE HOST VALIDATION ==="
 
 # SubProber - Double check live hosts
+SUBPROBER_PY=""
+for candidate in \
+    "/opt/SubProber/subprober.py" \
+    "/opt/SubProber/SubProber.py" \
+    "/opt/subprober/subprober.py"; do
+    if [ -f "$candidate" ]; then
+        SUBPROBER_PY="$candidate"
+        break
+    fi
+done
+
 if command -v subprober &> /dev/null; then
     log_info "Running SubProber for validation..."
     subprober -f "$ALIVE_HOSTS" -o "$PHASE_DIR/subprober_validated.txt" 2>/dev/null || log_warn "SubProber failed"
-
-    if [ -f "$PHASE_DIR/subprober_validated.txt" ]; then
-        VALIDATED_COUNT=$(wc -l < "$PHASE_DIR/subprober_validated.txt" | tr -d ' ')
-        log_info "SubProber validated $VALIDATED_COUNT hosts"
-    fi
+elif [ -n "$SUBPROBER_PY" ]; then
+    log_info "Running SubProber (Python)..."
+    python3 "$SUBPROBER_PY" -f "$ALIVE_HOSTS" -o "$PHASE_DIR/subprober_validated.txt" 2>/dev/null || log_warn "SubProber failed"
 else
     log_warn "SubProber not found, using Phase 1 alive hosts"
-    cp "$ALIVE_HOSTS" "$PHASE_DIR/subprober_validated.txt"
+    cp "$ALIVE_HOSTS" "$PHASE_DIR/subprober_validated.txt" 2>/dev/null || touch "$PHASE_DIR/subprober_validated.txt"
 fi
 
-# Use validated hosts for remaining scans
-SCAN_HOSTS="$PHASE_DIR/subprober_validated.txt"
+if [ ! -s "$PHASE_DIR/subprober_validated.txt" ]; then
+    log_warn "SubProber produced no output, falling back to Phase 1 alive hosts"
+    cp "$ALIVE_HOSTS" "$PHASE_DIR/subprober_validated.txt" 2>/dev/null || touch "$PHASE_DIR/subprober_validated.txt"
+fi
+
+if [ -f "$PHASE_DIR/subprober_validated.txt" ]; then
+    VALIDATED_COUNT=$(wc -l < "$PHASE_DIR/subprober_validated.txt" | tr -d ' ')
+    log_info "SubProber validated $VALIDATED_COUNT hosts"
+fi
+
+# Use union of Phase 1 alive hosts and SubProber results for remaining scans
+safe_cat "$PHASE_DIR/scan_hosts.txt" "$ALIVE_HOSTS" "$PHASE_DIR/subprober_validated.txt"
+sort -u "$PHASE_DIR/scan_hosts.txt" -o "$PHASE_DIR/scan_hosts.txt"
+SCAN_HOSTS="$PHASE_DIR/scan_hosts.txt"
 
 ################################################################################
 # PHASE 2B: PORT SCANNING
@@ -122,9 +208,7 @@ if command -v nmap &> /dev/null && [ "$TARGETS_COUNT" -gt 0 ]; then
         done < "$PORTS_DIR/targets.txt"
 
         # Merge all XML outputs
-        if compgen -G "$PORTS_DIR/nmap_*.xml" > /dev/null; then
-            cat "$PORTS_DIR"/nmap_*.xml 2>/dev/null > "$PORTS_DIR/nmap_all.xml" || touch "$PORTS_DIR/nmap_all.xml"
-        fi
+        safe_cat "$PORTS_DIR/nmap_all.xml" "$PORTS_DIR"/nmap_*.xml
     fi
 else
     log_warn "Nmap not found or no scan targets"
@@ -151,7 +235,7 @@ if command -v shodan &> /dev/null && [ ! -z "$SHODAN_API_KEY" ] && [ "$ALIVE_COU
     done < "$SCAN_HOSTS"
 
     # Merge results
-    cat "$OSINT_DIR"/shodan_*.txt 2>/dev/null > "$OSINT_DIR/shodan_all.txt" || touch "$OSINT_DIR/shodan_all.txt"
+    safe_cat "$OSINT_DIR/shodan_all.txt" "$OSINT_DIR"/shodan_*.txt
 else
     log_warn "Shodan CLI not found, SHODAN_API_KEY not set, or no scan hosts"
 fi
@@ -159,12 +243,62 @@ fi
 # ShodanX (Revolt suite)
 if command -v shodanx &> /dev/null && [ ! -z "$SHODAN_API_KEY" ]; then
     log_info "Running ShodanX..."
-    shodanx -d "$TARGET" -o "$OSINT_DIR/shodanx.json" 2>/dev/null || log_warn "ShodanX failed"
+
+    if run_shodanx_mode "domain" "$OSINT_DIR/shodanx_domain.txt"; then
+        log_info "ShodanX domain lookup completed"
+    else
+        log_warn "ShodanX domain lookup failed"
+    fi
+
+    if run_shodanx_mode "subdomain" "$OSINT_DIR/shodanx_subdomains.txt"; then
+        log_info "ShodanX subdomain lookup completed"
+    else
+        log_warn "ShodanX subdomain lookup failed"
+    fi
 elif [ -f "/opt/shodanx/shodanx.py" ] && [ ! -z "$SHODAN_API_KEY" ]; then
     log_info "Running ShodanX (Python)..."
     python3 /opt/shodanx/shodanx.py -d "$TARGET" -o "$OSINT_DIR/shodanx.json" 2>/dev/null || log_warn "ShodanX failed"
 else
     log_warn "ShodanX not found"
+fi
+
+# GoogleDorker (Revolt suite)
+GOOGLEDORKER_PY=""
+for candidate in \
+    "/opt/GoogleDorker/dorker.py" \
+    "/opt/GoogleDorker/GoogleDorker.py"; do
+    if [ -f "$candidate" ]; then
+        GOOGLEDORKER_PY="$candidate"
+        break
+    fi
+done
+
+DORKS_FILE="$OSINT_DIR/googledorker_queries.txt"
+cat > "$DORKS_FILE" <<EOF
+site:$TARGET
+site:*.$TARGET
+site:$TARGET inurl:admin
+site:$TARGET inurl:login
+site:$TARGET ext:sql
+site:$TARGET ext:env
+site:$TARGET ext:bak
+site:$TARGET "index of" "backup"
+EOF
+
+if command -v dorker &> /dev/null; then
+    log_info "Running GoogleDorker..."
+    if ! dorker -l "$DORKS_FILE" -o "$OSINT_DIR/googledorker.txt" 2>/dev/null; then
+        log_warn "GoogleDorker list mode failed, falling back to single queries"
+        > "$OSINT_DIR/googledorker.txt"
+        while IFS= read -r dork; do
+            dorker -q "$dork" 2>/dev/null >> "$OSINT_DIR/googledorker.txt" || true
+        done < "$DORKS_FILE"
+    fi
+elif [ -n "$GOOGLEDORKER_PY" ]; then
+    log_info "Running GoogleDorker (Python)..."
+    python3 "$GOOGLEDORKER_PY" -l "$DORKS_FILE" -o "$OSINT_DIR/googledorker.txt" 2>/dev/null || log_warn "GoogleDorker failed"
+else
+    log_warn "GoogleDorker not found"
 fi
 
 # Censys CLI
@@ -178,7 +312,7 @@ if command -v censys &> /dev/null && [ ! -z "$CENSYS_API_ID" ] && [ ! -z "$CENSY
     done < "$SCAN_HOSTS"
 
     # Merge results
-    cat "$OSINT_DIR"/censys_*.json 2>/dev/null > "$OSINT_DIR/censys_all.json" || touch "$OSINT_DIR/censys_all.json"
+    safe_cat "$OSINT_DIR/censys_all.json" "$OSINT_DIR"/censys_*.json
 else
     log_warn "Censys CLI not found, API credentials not set, or no scan hosts"
 fi
