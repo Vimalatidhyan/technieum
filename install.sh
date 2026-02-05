@@ -28,6 +28,26 @@ log_section() {
     echo -e "\n${BLUE}[*] $1${NC}\n"
 }
 
+git_clone_or_pull() {
+    local repo_url="$1"
+    local dest_dir="$2"
+    local repo_name
+
+    if [ -z "$repo_url" ] || [ -z "$dest_dir" ]; then
+        return 1
+    fi
+
+    repo_name="$(basename "$dest_dir")"
+
+    if [ -d "$dest_dir/.git" ]; then
+        log_info "Updating $repo_name..."
+        (cd "$dest_dir" && GIT_TERMINAL_PROMPT=0 git pull --ff-only) || log_warn "Failed to update $repo_name"
+    else
+        log_info "Cloning $repo_name..."
+        GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$repo_url" "$dest_dir" || log_warn "Failed to clone $repo_name"
+    fi
+}
+
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
     log_error "Please run as root (use sudo)"
@@ -218,8 +238,10 @@ go install -v github.com/hahwul/dalfox/v2@latest
 
 # API Discovery
 log_info "Installing Kiterunner..."
-git clone https://github.com/assetnote/kiterunner.git "$TOOLS_DIR/kiterunner" 2>/dev/null || true
-cd "$TOOLS_DIR/kiterunner" && make build && ln -sf "$TOOLS_DIR/kiterunner/dist/kr" /usr/local/bin/kr || true
+git_clone_or_pull "https://github.com/assetnote/kiterunner.git" "$TOOLS_DIR/kiterunner"
+if [ -d "$TOOLS_DIR/kiterunner" ]; then
+    cd "$TOOLS_DIR/kiterunner" && make build && ln -sf "$TOOLS_DIR/kiterunner/dist/kr" /usr/local/bin/kr || true
+fi
 
 ################################################################################
 # Rust Tools
@@ -253,101 +275,125 @@ log_section "Installing Python-based Tools"
 
 # Sublist3r
 log_info "Installing Sublist3r..."
-git clone https://github.com/aboul3la/Sublist3r.git "$INSTALL_DIR/Sublist3r" 2>/dev/null || (cd "$INSTALL_DIR/Sublist3r" && git pull)
-cd "$INSTALL_DIR/Sublist3r" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
-create_py_wrapper "sublist3r" "$INSTALL_DIR/Sublist3r/sublist3r.py" || true
+git_clone_or_pull "https://github.com/aboul3la/Sublist3r.git" "$INSTALL_DIR/Sublist3r"
+if [ -d "$INSTALL_DIR/Sublist3r" ]; then
+    cd "$INSTALL_DIR/Sublist3r" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    create_py_wrapper "sublist3r" "$INSTALL_DIR/Sublist3r/sublist3r.py" || true
+fi
 
 # Subdominator (RevoltSecurities)
 log_info "Installing Subdominator..."
-git clone https://github.com/RevoltSecurities/Subdominator.git "$INSTALL_DIR/Subdominator" 2>/dev/null || (cd "$INSTALL_DIR/Subdominator" && git pull)
-cd "$INSTALL_DIR/Subdominator" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
-if [ -f "$INSTALL_DIR/Subdominator/subdominator.py" ]; then
-    create_py_wrapper "subdominator" "$INSTALL_DIR/Subdominator/subdominator.py" || true
-elif [ -f "$INSTALL_DIR/Subdominator/Subdominator.py" ]; then
-    create_py_wrapper "subdominator" "$INSTALL_DIR/Subdominator/Subdominator.py" || true
+git_clone_or_pull "https://github.com/RevoltSecurities/Subdominator.git" "$INSTALL_DIR/Subdominator"
+if [ -d "$INSTALL_DIR/Subdominator" ]; then
+    cd "$INSTALL_DIR/Subdominator" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    if [ -f "$INSTALL_DIR/Subdominator/subdominator.py" ]; then
+        create_py_wrapper "subdominator" "$INSTALL_DIR/Subdominator/subdominator.py" || true
+    elif [ -f "$INSTALL_DIR/Subdominator/Subdominator.py" ]; then
+        create_py_wrapper "subdominator" "$INSTALL_DIR/Subdominator/Subdominator.py" || true
+    fi
+    ln -sfn "$INSTALL_DIR/Subdominator" "$INSTALL_DIR/SubDominator" || true
 fi
-ln -sfn "$INSTALL_DIR/Subdominator" "$INSTALL_DIR/SubDominator" || true
 
 # SubProber (RevoltSecurities)
 log_info "Installing SubProber..."
-git clone https://github.com/RevoltSecurities/SubProber.git "$INSTALL_DIR/SubProber" 2>/dev/null || (cd "$INSTALL_DIR/SubProber" && git pull)
-cd "$INSTALL_DIR/SubProber" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
-if [ -f "$INSTALL_DIR/SubProber/subprober.py" ]; then
-    create_py_wrapper "subprober" "$INSTALL_DIR/SubProber/subprober.py" || true
-elif [ -f "$INSTALL_DIR/SubProber/SubProber.py" ]; then
-    create_py_wrapper "subprober" "$INSTALL_DIR/SubProber/SubProber.py" || true
+git_clone_or_pull "https://github.com/RevoltSecurities/SubProber.git" "$INSTALL_DIR/SubProber"
+if [ -d "$INSTALL_DIR/SubProber" ]; then
+    cd "$INSTALL_DIR/SubProber" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    if [ -f "$INSTALL_DIR/SubProber/subprober.py" ]; then
+        create_py_wrapper "subprober" "$INSTALL_DIR/SubProber/subprober.py" || true
+    elif [ -f "$INSTALL_DIR/SubProber/SubProber.py" ]; then
+        create_py_wrapper "subprober" "$INSTALL_DIR/SubProber/SubProber.py" || true
+    fi
+    ln -sfn "$INSTALL_DIR/SubProber" "$INSTALL_DIR/subprober" || true
 fi
-ln -sfn "$INSTALL_DIR/SubProber" "$INSTALL_DIR/subprober" || true
 
 # ShodanX (RevoltSecurities)
 log_info "Installing ShodanX..."
-git clone https://github.com/RevoltSecurities/ShodanX.git "$INSTALL_DIR/ShodanX" 2>/dev/null || (cd "$INSTALL_DIR/ShodanX" && git pull)
-cd "$INSTALL_DIR/ShodanX" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
-if [ -f "$INSTALL_DIR/ShodanX/shodanx.py" ]; then
-    create_py_wrapper "shodanx" "$INSTALL_DIR/ShodanX/shodanx.py" || true
-elif [ -f "$INSTALL_DIR/ShodanX/ShodanX.py" ]; then
-    create_py_wrapper "shodanx" "$INSTALL_DIR/ShodanX/ShodanX.py" || true
+git_clone_or_pull "https://github.com/RevoltSecurities/ShodanX.git" "$INSTALL_DIR/ShodanX"
+if [ -d "$INSTALL_DIR/ShodanX" ]; then
+    cd "$INSTALL_DIR/ShodanX" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    if [ -f "$INSTALL_DIR/ShodanX/shodanx.py" ]; then
+        create_py_wrapper "shodanx" "$INSTALL_DIR/ShodanX/shodanx.py" || true
+    elif [ -f "$INSTALL_DIR/ShodanX/ShodanX.py" ]; then
+        create_py_wrapper "shodanx" "$INSTALL_DIR/ShodanX/ShodanX.py" || true
+    fi
+    ln -sfn "$INSTALL_DIR/ShodanX" "$INSTALL_DIR/shodanx" || true
 fi
-ln -sfn "$INSTALL_DIR/ShodanX" "$INSTALL_DIR/shodanx" || true
 
 # GoogleDorker (RevoltSecurities)
 log_info "Installing GoogleDorker..."
-git clone https://github.com/RevoltSecurities/GoogleDorker.git "$INSTALL_DIR/GoogleDorker" 2>/dev/null || (cd "$INSTALL_DIR/GoogleDorker" && git pull)
-cd "$INSTALL_DIR/GoogleDorker" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
-if [ -f "$INSTALL_DIR/GoogleDorker/dorker.py" ]; then
-    create_py_wrapper "dorker" "$INSTALL_DIR/GoogleDorker/dorker.py" || true
-elif [ -f "$INSTALL_DIR/GoogleDorker/GoogleDorker.py" ]; then
-    create_py_wrapper "dorker" "$INSTALL_DIR/GoogleDorker/GoogleDorker.py" || true
+git_clone_or_pull "https://github.com/RevoltSecurities/GoogleDorker.git" "$INSTALL_DIR/GoogleDorker"
+if [ -d "$INSTALL_DIR/GoogleDorker" ]; then
+    cd "$INSTALL_DIR/GoogleDorker" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    if [ -f "$INSTALL_DIR/GoogleDorker/dorker.py" ]; then
+        create_py_wrapper "dorker" "$INSTALL_DIR/GoogleDorker/dorker.py" || true
+    elif [ -f "$INSTALL_DIR/GoogleDorker/GoogleDorker.py" ]; then
+        create_py_wrapper "dorker" "$INSTALL_DIR/GoogleDorker/GoogleDorker.py" || true
+    fi
 fi
 
 # SpideyX (RevoltSecurities)
 log_info "Installing SpideyX..."
-git clone https://github.com/RevoltSecurities/SpideyX.git "$INSTALL_DIR/SpideyX" 2>/dev/null || (cd "$INSTALL_DIR/SpideyX" && git pull)
-cd "$INSTALL_DIR/SpideyX" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
-if [ -f "$INSTALL_DIR/SpideyX/spideyx.py" ]; then
-    create_py_wrapper "spideyx" "$INSTALL_DIR/SpideyX/spideyx.py" || true
-elif [ -f "$INSTALL_DIR/SpideyX/SpideyX.py" ]; then
-    create_py_wrapper "spideyx" "$INSTALL_DIR/SpideyX/SpideyX.py" || true
+git_clone_or_pull "https://github.com/RevoltSecurities/SpideyX.git" "$INSTALL_DIR/SpideyX"
+if [ -d "$INSTALL_DIR/SpideyX" ]; then
+    cd "$INSTALL_DIR/SpideyX" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    if [ -f "$INSTALL_DIR/SpideyX/spideyx.py" ]; then
+        create_py_wrapper "spideyx" "$INSTALL_DIR/SpideyX/spideyx.py" || true
+    elif [ -f "$INSTALL_DIR/SpideyX/SpideyX.py" ]; then
+        create_py_wrapper "spideyx" "$INSTALL_DIR/SpideyX/SpideyX.py" || true
+    fi
 fi
 
 # Dnsbruter (RevoltSecurities)
 log_info "Installing Dnsbruter..."
-git clone https://github.com/RevoltSecurities/Dnsbruter.git "$INSTALL_DIR/Dnsbruter" 2>/dev/null || (cd "$INSTALL_DIR/Dnsbruter" && git pull)
-cd "$INSTALL_DIR/Dnsbruter" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
-if [ -f "$INSTALL_DIR/Dnsbruter/dnsbruter.py" ]; then
-    create_py_wrapper "dnsbruter" "$INSTALL_DIR/Dnsbruter/dnsbruter.py" || true
+git_clone_or_pull "https://github.com/RevoltSecurities/Dnsbruter.git" "$INSTALL_DIR/Dnsbruter"
+if [ -d "$INSTALL_DIR/Dnsbruter" ]; then
+    cd "$INSTALL_DIR/Dnsbruter" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    if [ -f "$INSTALL_DIR/Dnsbruter/dnsbruter.py" ]; then
+        create_py_wrapper "dnsbruter" "$INSTALL_DIR/Dnsbruter/dnsbruter.py" || true
+    fi
+    ln -sfn "$INSTALL_DIR/Dnsbruter" "$INSTALL_DIR/dnsbruter" || true
 fi
-ln -sfn "$INSTALL_DIR/Dnsbruter" "$INSTALL_DIR/dnsbruter" || true
 
 # Dirsearch
 log_info "Installing Dirsearch..."
-git clone https://github.com/maurosoria/dirsearch.git "$INSTALL_DIR/dirsearch" 2>/dev/null || (cd "$INSTALL_DIR/dirsearch" && git pull)
-cd "$INSTALL_DIR/dirsearch" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
-create_py_wrapper "dirsearch" "$INSTALL_DIR/dirsearch/dirsearch.py" || true
+git_clone_or_pull "https://github.com/maurosoria/dirsearch.git" "$INSTALL_DIR/dirsearch"
+if [ -d "$INSTALL_DIR/dirsearch" ]; then
+    cd "$INSTALL_DIR/dirsearch" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    create_py_wrapper "dirsearch" "$INSTALL_DIR/dirsearch/dirsearch.py" || true
+fi
 
 # LinkFinder
 log_info "Installing LinkFinder..."
-git clone https://github.com/GerbenJavado/LinkFinder.git "$INSTALL_DIR/LinkFinder" 2>/dev/null || (cd "$INSTALL_DIR/LinkFinder" && git pull)
-cd "$INSTALL_DIR/LinkFinder" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
-create_py_wrapper "linkfinder" "$INSTALL_DIR/LinkFinder/linkfinder.py" || true
+git_clone_or_pull "https://github.com/GerbenJavado/LinkFinder.git" "$INSTALL_DIR/LinkFinder"
+if [ -d "$INSTALL_DIR/LinkFinder" ]; then
+    cd "$INSTALL_DIR/LinkFinder" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    create_py_wrapper "linkfinder" "$INSTALL_DIR/LinkFinder/linkfinder.py" || true
+fi
 
 # SecretFinder
 log_info "Installing SecretFinder..."
-git clone https://github.com/m4ll0k/SecretFinder.git "$INSTALL_DIR/SecretFinder" 2>/dev/null || (cd "$INSTALL_DIR/SecretFinder" && git pull)
-cd "$INSTALL_DIR/SecretFinder" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
-create_py_wrapper "secretfinder" "$INSTALL_DIR/SecretFinder/SecretFinder.py" || true
+git_clone_or_pull "https://github.com/m4ll0k/SecretFinder.git" "$INSTALL_DIR/SecretFinder"
+if [ -d "$INSTALL_DIR/SecretFinder" ]; then
+    cd "$INSTALL_DIR/SecretFinder" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    create_py_wrapper "secretfinder" "$INSTALL_DIR/SecretFinder/SecretFinder.py" || true
+fi
 
 # Corsy
 log_info "Installing Corsy..."
-git clone https://github.com/s0md3v/Corsy.git "$INSTALL_DIR/Corsy" 2>/dev/null || (cd "$INSTALL_DIR/Corsy" && git pull)
-cd "$INSTALL_DIR/Corsy" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
-create_py_wrapper "corsy" "$INSTALL_DIR/Corsy/corsy.py" || true
+git_clone_or_pull "https://github.com/s0md3v/Corsy.git" "$INSTALL_DIR/Corsy"
+if [ -d "$INSTALL_DIR/Corsy" ]; then
+    cd "$INSTALL_DIR/Corsy" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    create_py_wrapper "corsy" "$INSTALL_DIR/Corsy/corsy.py" || true
+fi
 
 # XSStrike
 log_info "Installing XSStrike..."
-git clone https://github.com/s0md3v/XSStrike.git "$INSTALL_DIR/XSStrike" 2>/dev/null || (cd "$INSTALL_DIR/XSStrike" && git pull)
-cd "$INSTALL_DIR/XSStrike" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
-create_py_wrapper "xsstrike" "$INSTALL_DIR/XSStrike/xsstrike.py" || true
+git_clone_or_pull "https://github.com/s0md3v/XSStrike.git" "$INSTALL_DIR/XSStrike"
+if [ -d "$INSTALL_DIR/XSStrike" ]; then
+    cd "$INSTALL_DIR/XSStrike" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    create_py_wrapper "xsstrike" "$INSTALL_DIR/XSStrike/xsstrike.py" || true
+fi
 
 # Arjun (Python version)
 log_info "Installing Arjun..."
@@ -355,13 +401,17 @@ log_info "Installing Arjun..."
 
 # GitHunt
 log_info "Installing GitHunt..."
-git clone https://github.com/tillson/git-hound.git "$INSTALL_DIR/GitHunt" 2>/dev/null || (cd "$INSTALL_DIR/GitHunt" && git pull)
-create_py_wrapper "githunt" "$INSTALL_DIR/GitHunt/githound.py" || true
+git_clone_or_pull "https://github.com/tillson/git-hound.git" "$INSTALL_DIR/GitHunt"
+if [ -f "$INSTALL_DIR/GitHunt/githound.py" ]; then
+    create_py_wrapper "githunt" "$INSTALL_DIR/GitHunt/githound.py" || true
+fi
 
 # Get Subsidiaries
 log_info "Installing getSubsidiaries..."
-git clone https://github.com/Josue87/getSubsidiaries.git "$INSTALL_DIR/getSubsidiaries" 2>/dev/null || (cd "$INSTALL_DIR/getSubsidiaries" && git pull)
-create_py_wrapper "getsubsidiaries" "$INSTALL_DIR/getSubsidiaries/getSubsidiaries.py" || true
+git_clone_or_pull "https://github.com/Josue87/getSubsidiaries.git" "$INSTALL_DIR/getSubsidiaries"
+if [ -f "$INSTALL_DIR/getSubsidiaries/getSubsidiaries.py" ]; then
+    create_py_wrapper "getsubsidiaries" "$INSTALL_DIR/getSubsidiaries/getSubsidiaries.py" || true
+fi
 
 ################################################################################
 # Specialized Tools
@@ -395,8 +445,10 @@ log_info "Installing Wapiti..."
 
 # CMSmap
 log_info "Installing CMSmap..."
-git clone https://github.com/Dionach/CMSmap.git "$INSTALL_DIR/CMSmap" 2>/dev/null || (cd "$INSTALL_DIR/CMSmap" && git pull)
-ln -sf "$INSTALL_DIR/CMSmap/cmsmap.py" /usr/local/bin/cmsmap || true
+git_clone_or_pull "https://github.com/Dionach/CMSmap.git" "$INSTALL_DIR/CMSmap"
+if [ -f "$INSTALL_DIR/CMSmap/cmsmap.py" ]; then
+    create_py_wrapper "cmsmap" "$INSTALL_DIR/CMSmap/cmsmap.py" || true
+fi
 
 # Retire.js
 log_info "Installing Retire.js..."
@@ -404,8 +456,10 @@ npm install -g retire || log_warn "Retire.js install failed"
 
 # testssl.sh
 log_info "Installing testssl.sh..."
-git clone --depth 1 https://github.com/drwetter/testssl.sh.git "$INSTALL_DIR/testssl.sh" 2>/dev/null || (cd "$INSTALL_DIR/testssl.sh" && git pull)
-ln -sf "$INSTALL_DIR/testssl.sh/testssl.sh" /usr/local/bin/testssl.sh || true
+git_clone_or_pull "https://github.com/drwetter/testssl.sh.git" "$INSTALL_DIR/testssl.sh"
+if [ -f "$INSTALL_DIR/testssl.sh/testssl.sh" ]; then
+    ln -sf "$INSTALL_DIR/testssl.sh/testssl.sh" /usr/local/bin/testssl.sh || true
+fi
 
 # SSLyze
 log_info "Installing SSLyze..."
@@ -425,8 +479,10 @@ npm install -g newman || log_warn "Newman install failed"
 
 # git-secrets
 log_info "Installing git-secrets..."
-git clone https://github.com/awslabs/git-secrets.git "$INSTALL_DIR/git-secrets" 2>/dev/null || (cd "$INSTALL_DIR/git-secrets" && git pull)
-cd "$INSTALL_DIR/git-secrets" && make install || true
+git_clone_or_pull "https://github.com/awslabs/git-secrets.git" "$INSTALL_DIR/git-secrets"
+if [ -d "$INSTALL_DIR/git-secrets" ]; then
+    cd "$INSTALL_DIR/git-secrets" && make install || true
+fi
 
 ################################################################################
 # Wordlists
@@ -436,7 +492,7 @@ log_section "Installing Wordlists"
 
 if [ ! -d "/usr/share/seclists" ]; then
     log_info "Installing SecLists..."
-    git clone --depth 1 https://github.com/danielmiessler/SecLists.git /usr/share/seclists
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 https://github.com/danielmiessler/SecLists.git /usr/share/seclists || log_warn "Failed to clone SecLists"
 else
     log_info "SecLists already installed"
 fi
