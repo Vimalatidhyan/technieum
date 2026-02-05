@@ -107,13 +107,47 @@ else
 fi
 
 ################################################################################
+# Python Environment Setup
+################################################################################
+
+log_section "Setting Up Python Environment"
+
+VENV_DIR="$TOOLS_DIR/venv"
+PIP_CMD="pip3"
+PYTHON_CMD="python3"
+
+create_py_wrapper() {
+    local name="$1"
+    local script_path="$2"
+
+    if [ -z "$name" ] || [ -z "$script_path" ]; then
+        return 1
+    fi
+
+    cat > "/usr/local/bin/$name" <<EOF
+#!/bin/bash
+exec "$PYTHON_CMD" "$script_path" "\$@"
+EOF
+    chmod +x "/usr/local/bin/$name" || true
+}
+
+# Kali uses PEP 668; prefer a dedicated venv for all Python tools
+if [ "$OS" = "kali" ]; then
+    log_info "Creating Python venv for tool installs (Kali PEP 668 compliant)..."
+    python3 -m venv "$VENV_DIR" || log_warn "Failed to create venv"
+    PIP_CMD="$VENV_DIR/bin/pip"
+    PYTHON_CMD="$VENV_DIR/bin/python"
+    export PATH="$VENV_DIR/bin:$PATH"
+fi
+
+################################################################################
 # Python Dependencies
 ################################################################################
 
 log_section "Installing Python Dependencies"
 
-pip3 install --upgrade pip
-pip3 install \
+"$PIP_CMD" install --upgrade pip
+"$PIP_CMD" install \
     requests \
     beautifulsoup4 \
     dnspython \
@@ -220,108 +254,114 @@ log_section "Installing Python-based Tools"
 # Sublist3r
 log_info "Installing Sublist3r..."
 git clone https://github.com/aboul3la/Sublist3r.git "$INSTALL_DIR/Sublist3r" 2>/dev/null || (cd "$INSTALL_DIR/Sublist3r" && git pull)
-cd "$INSTALL_DIR/Sublist3r" && pip3 install -r requirements.txt || true
+cd "$INSTALL_DIR/Sublist3r" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+create_py_wrapper "sublist3r" "$INSTALL_DIR/Sublist3r/sublist3r.py" || true
 
 # Subdominator (RevoltSecurities)
 log_info "Installing Subdominator..."
 git clone https://github.com/RevoltSecurities/Subdominator.git "$INSTALL_DIR/Subdominator" 2>/dev/null || (cd "$INSTALL_DIR/Subdominator" && git pull)
-cd "$INSTALL_DIR/Subdominator" && [ -f requirements.txt ] && pip3 install -r requirements.txt || true
+cd "$INSTALL_DIR/Subdominator" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
 if [ -f "$INSTALL_DIR/Subdominator/subdominator.py" ]; then
-    ln -sf "$INSTALL_DIR/Subdominator/subdominator.py" /usr/local/bin/subdominator || true
+    create_py_wrapper "subdominator" "$INSTALL_DIR/Subdominator/subdominator.py" || true
 elif [ -f "$INSTALL_DIR/Subdominator/Subdominator.py" ]; then
-    ln -sf "$INSTALL_DIR/Subdominator/Subdominator.py" /usr/local/bin/subdominator || true
+    create_py_wrapper "subdominator" "$INSTALL_DIR/Subdominator/Subdominator.py" || true
 fi
 ln -sfn "$INSTALL_DIR/Subdominator" "$INSTALL_DIR/SubDominator" || true
 
 # SubProber (RevoltSecurities)
 log_info "Installing SubProber..."
 git clone https://github.com/RevoltSecurities/SubProber.git "$INSTALL_DIR/SubProber" 2>/dev/null || (cd "$INSTALL_DIR/SubProber" && git pull)
-cd "$INSTALL_DIR/SubProber" && [ -f requirements.txt ] && pip3 install -r requirements.txt || true
+cd "$INSTALL_DIR/SubProber" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
 if [ -f "$INSTALL_DIR/SubProber/subprober.py" ]; then
-    ln -sf "$INSTALL_DIR/SubProber/subprober.py" /usr/local/bin/subprober || true
+    create_py_wrapper "subprober" "$INSTALL_DIR/SubProber/subprober.py" || true
 elif [ -f "$INSTALL_DIR/SubProber/SubProber.py" ]; then
-    ln -sf "$INSTALL_DIR/SubProber/SubProber.py" /usr/local/bin/subprober || true
+    create_py_wrapper "subprober" "$INSTALL_DIR/SubProber/SubProber.py" || true
 fi
 ln -sfn "$INSTALL_DIR/SubProber" "$INSTALL_DIR/subprober" || true
 
 # ShodanX (RevoltSecurities)
 log_info "Installing ShodanX..."
 git clone https://github.com/RevoltSecurities/ShodanX.git "$INSTALL_DIR/ShodanX" 2>/dev/null || (cd "$INSTALL_DIR/ShodanX" && git pull)
-cd "$INSTALL_DIR/ShodanX" && [ -f requirements.txt ] && pip3 install -r requirements.txt || true
+cd "$INSTALL_DIR/ShodanX" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
 if [ -f "$INSTALL_DIR/ShodanX/shodanx.py" ]; then
-    ln -sf "$INSTALL_DIR/ShodanX/shodanx.py" /usr/local/bin/shodanx || true
+    create_py_wrapper "shodanx" "$INSTALL_DIR/ShodanX/shodanx.py" || true
 elif [ -f "$INSTALL_DIR/ShodanX/ShodanX.py" ]; then
-    ln -sf "$INSTALL_DIR/ShodanX/ShodanX.py" /usr/local/bin/shodanx || true
+    create_py_wrapper "shodanx" "$INSTALL_DIR/ShodanX/ShodanX.py" || true
 fi
 ln -sfn "$INSTALL_DIR/ShodanX" "$INSTALL_DIR/shodanx" || true
 
 # GoogleDorker (RevoltSecurities)
 log_info "Installing GoogleDorker..."
 git clone https://github.com/RevoltSecurities/GoogleDorker.git "$INSTALL_DIR/GoogleDorker" 2>/dev/null || (cd "$INSTALL_DIR/GoogleDorker" && git pull)
-cd "$INSTALL_DIR/GoogleDorker" && [ -f requirements.txt ] && pip3 install -r requirements.txt || true
+cd "$INSTALL_DIR/GoogleDorker" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
 if [ -f "$INSTALL_DIR/GoogleDorker/dorker.py" ]; then
-    ln -sf "$INSTALL_DIR/GoogleDorker/dorker.py" /usr/local/bin/dorker || true
+    create_py_wrapper "dorker" "$INSTALL_DIR/GoogleDorker/dorker.py" || true
 elif [ -f "$INSTALL_DIR/GoogleDorker/GoogleDorker.py" ]; then
-    ln -sf "$INSTALL_DIR/GoogleDorker/GoogleDorker.py" /usr/local/bin/dorker || true
+    create_py_wrapper "dorker" "$INSTALL_DIR/GoogleDorker/GoogleDorker.py" || true
 fi
 
 # SpideyX (RevoltSecurities)
 log_info "Installing SpideyX..."
 git clone https://github.com/RevoltSecurities/SpideyX.git "$INSTALL_DIR/SpideyX" 2>/dev/null || (cd "$INSTALL_DIR/SpideyX" && git pull)
-cd "$INSTALL_DIR/SpideyX" && [ -f requirements.txt ] && pip3 install -r requirements.txt || true
+cd "$INSTALL_DIR/SpideyX" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
 if [ -f "$INSTALL_DIR/SpideyX/spideyx.py" ]; then
-    ln -sf "$INSTALL_DIR/SpideyX/spideyx.py" /usr/local/bin/spideyx || true
+    create_py_wrapper "spideyx" "$INSTALL_DIR/SpideyX/spideyx.py" || true
 elif [ -f "$INSTALL_DIR/SpideyX/SpideyX.py" ]; then
-    ln -sf "$INSTALL_DIR/SpideyX/SpideyX.py" /usr/local/bin/spideyx || true
+    create_py_wrapper "spideyx" "$INSTALL_DIR/SpideyX/SpideyX.py" || true
 fi
 
 # Dnsbruter (RevoltSecurities)
 log_info "Installing Dnsbruter..."
 git clone https://github.com/RevoltSecurities/Dnsbruter.git "$INSTALL_DIR/Dnsbruter" 2>/dev/null || (cd "$INSTALL_DIR/Dnsbruter" && git pull)
-cd "$INSTALL_DIR/Dnsbruter" && [ -f requirements.txt ] && pip3 install -r requirements.txt || true
+cd "$INSTALL_DIR/Dnsbruter" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
 if [ -f "$INSTALL_DIR/Dnsbruter/dnsbruter.py" ]; then
-    ln -sf "$INSTALL_DIR/Dnsbruter/dnsbruter.py" /usr/local/bin/dnsbruter || true
+    create_py_wrapper "dnsbruter" "$INSTALL_DIR/Dnsbruter/dnsbruter.py" || true
 fi
 ln -sfn "$INSTALL_DIR/Dnsbruter" "$INSTALL_DIR/dnsbruter" || true
 
 # Dirsearch
 log_info "Installing Dirsearch..."
 git clone https://github.com/maurosoria/dirsearch.git "$INSTALL_DIR/dirsearch" 2>/dev/null || (cd "$INSTALL_DIR/dirsearch" && git pull)
-cd "$INSTALL_DIR/dirsearch" && pip3 install -r requirements.txt || true
-ln -sf "$INSTALL_DIR/dirsearch/dirsearch.py" /usr/local/bin/dirsearch || true
+cd "$INSTALL_DIR/dirsearch" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+create_py_wrapper "dirsearch" "$INSTALL_DIR/dirsearch/dirsearch.py" || true
 
 # LinkFinder
 log_info "Installing LinkFinder..."
 git clone https://github.com/GerbenJavado/LinkFinder.git "$INSTALL_DIR/LinkFinder" 2>/dev/null || (cd "$INSTALL_DIR/LinkFinder" && git pull)
-cd "$INSTALL_DIR/LinkFinder" && pip3 install -r requirements.txt || true
-ln -sf "$INSTALL_DIR/LinkFinder/linkfinder.py" /usr/local/bin/linkfinder || true
+cd "$INSTALL_DIR/LinkFinder" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+create_py_wrapper "linkfinder" "$INSTALL_DIR/LinkFinder/linkfinder.py" || true
 
 # SecretFinder
 log_info "Installing SecretFinder..."
 git clone https://github.com/m4ll0k/SecretFinder.git "$INSTALL_DIR/SecretFinder" 2>/dev/null || (cd "$INSTALL_DIR/SecretFinder" && git pull)
-cd "$INSTALL_DIR/SecretFinder" && pip3 install -r requirements.txt || true
+cd "$INSTALL_DIR/SecretFinder" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+create_py_wrapper "secretfinder" "$INSTALL_DIR/SecretFinder/SecretFinder.py" || true
 
 # Corsy
 log_info "Installing Corsy..."
 git clone https://github.com/s0md3v/Corsy.git "$INSTALL_DIR/Corsy" 2>/dev/null || (cd "$INSTALL_DIR/Corsy" && git pull)
-cd "$INSTALL_DIR/Corsy" && pip3 install -r requirements.txt || true
+cd "$INSTALL_DIR/Corsy" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+create_py_wrapper "corsy" "$INSTALL_DIR/Corsy/corsy.py" || true
 
 # XSStrike
 log_info "Installing XSStrike..."
 git clone https://github.com/s0md3v/XSStrike.git "$INSTALL_DIR/XSStrike" 2>/dev/null || (cd "$INSTALL_DIR/XSStrike" && git pull)
-cd "$INSTALL_DIR/XSStrike" && pip3 install -r requirements.txt || true
+cd "$INSTALL_DIR/XSStrike" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+create_py_wrapper "xsstrike" "$INSTALL_DIR/XSStrike/xsstrike.py" || true
 
 # Arjun (Python version)
 log_info "Installing Arjun..."
-pip3 install arjun || log_warn "Arjun install failed"
+"$PIP_CMD" install arjun || log_warn "Arjun install failed"
 
 # GitHunt
 log_info "Installing GitHunt..."
 git clone https://github.com/tillson/git-hound.git "$INSTALL_DIR/GitHunt" 2>/dev/null || (cd "$INSTALL_DIR/GitHunt" && git pull)
+create_py_wrapper "githunt" "$INSTALL_DIR/GitHunt/githound.py" || true
 
 # Get Subsidiaries
 log_info "Installing getSubsidiaries..."
 git clone https://github.com/Josue87/getSubsidiaries.git "$INSTALL_DIR/getSubsidiaries" 2>/dev/null || (cd "$INSTALL_DIR/getSubsidiaries" && git pull)
+create_py_wrapper "getsubsidiaries" "$INSTALL_DIR/getSubsidiaries/getSubsidiaries.py" || true
 
 ################################################################################
 # Specialized Tools
@@ -339,7 +379,7 @@ rm gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
 
 # TruffleHog
 log_info "Installing TruffleHog..."
-pip3 install trufflehog || log_warn "TruffleHog install failed"
+"$PIP_CMD" install trufflehog || log_warn "TruffleHog install failed"
 
 # Gospider (SpideyX alternative)
 log_info "Installing Gospider..."
@@ -351,7 +391,7 @@ gem install wpscan || log_warn "WPScan install failed"
 
 # Wapiti
 log_info "Installing Wapiti..."
-pip3 install wapiti3 || log_warn "Wapiti install failed"
+"$PIP_CMD" install wapiti3 || log_warn "Wapiti install failed"
 
 # CMSmap
 log_info "Installing CMSmap..."
@@ -369,15 +409,15 @@ ln -sf "$INSTALL_DIR/testssl.sh/testssl.sh" /usr/local/bin/testssl.sh || true
 
 # SSLyze
 log_info "Installing SSLyze..."
-pip3 install sslyze || log_warn "SSLyze install failed"
+"$PIP_CMD" install sslyze || log_warn "SSLyze install failed"
 
 # Shodan CLI
 log_info "Installing Shodan CLI..."
-pip3 install shodan || log_warn "Shodan install failed"
+"$PIP_CMD" install shodan || log_warn "Shodan install failed"
 
 # Censys CLI
 log_info "Installing Censys CLI..."
-pip3 install censys || log_warn "Censys install failed"
+"$PIP_CMD" install censys || log_warn "Censys install failed"
 
 # Newman (Postman CLI)
 log_info "Installing Newman..."
