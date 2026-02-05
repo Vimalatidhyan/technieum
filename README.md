@@ -139,7 +139,6 @@ ReconX implements **ALL** of the following tools across 4 phases:
 
 **Core Scanners**:
 - Nuclei (All templates, all severities)
-- Trivy (Config, image, dependency scanning)
 
 **Specific Vulnerabilities**:
 - Dalfox (XSS)
@@ -318,11 +317,10 @@ Options:
 
 **Purpose**: Comprehensive vulnerability assessment
 
-**Tools**: Nuclei, Trivy, Dalfox, SQLMap, Corsy, Nikto, WPScan, testssl.sh
+**Tools**: Nuclei, Dalfox, SQLMap, Corsy, Nikto, WPScan, testssl.sh
 
 **Output**:
 - Nuclei vulnerabilities (JSON)
-- Trivy scan results
 - XSS vulnerabilities
 - SQL injection findings
 - CORS misconfigurations
@@ -479,8 +477,6 @@ output/
     └── phase4_vulnscan/
         ├── nuclei/
         │   └── nuclei_all.json
-        ├── trivy/
-        │   └── trivy_all.json
         ├── xss/
         │   └── dalfox_results.txt
         └── sqli/

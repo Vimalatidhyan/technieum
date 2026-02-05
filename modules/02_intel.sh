@@ -4,7 +4,8 @@
 # Port scanning, OSINT, Takeover detection, Repo leaks
 ################################################################################
 
-set -e
+# DO NOT use set -e - we want to continue even if tools fail
+set -o pipefail  # Catch errors in pipelines
 TARGET="$1"
 OUTPUT_DIR="$2"
 
@@ -47,6 +48,9 @@ fi
 ALIVE_HOSTS="$PHASE1_DIR/alive_hosts.txt"
 ALIVE_COUNT=$(wc -l < "$ALIVE_HOSTS" | tr -d ' ')
 log_info "Found $ALIVE_COUNT alive hosts from Phase 1"
+if [ "$ALIVE_COUNT" -eq 0 ]; then
+    log_warn "No alive hosts found in Phase 1; Phase 2 will be limited"
+fi
 
 ################################################################################
 # PHASE 2A: LIVE HOST VALIDATION
@@ -82,9 +86,10 @@ mkdir -p "$PORTS_DIR"
 
 # Extract just hostnames/IPs for port scanning
 cat "$SCAN_HOSTS" | sed -E 's|^https?://||' | sed 's|/.*||' | sort -u > "$PORTS_DIR/targets.txt"
+TARGETS_COUNT=$(wc -l < "$PORTS_DIR/targets.txt" 2>/dev/null | tr -d ' ')
 
 # RustScan - Fast initial scan
-if command -v rustscan &> /dev/null; then
+if command -v rustscan &> /dev/null && [ "$TARGETS_COUNT" -gt 0 ]; then
     log_info "Running RustScan (fast port discovery)..."
 
     # Scan hosts in batches
@@ -99,11 +104,11 @@ if command -v rustscan &> /dev/null; then
         grep -oP '\d+\.\d+\.\d+\.\d+:\d+|\[.*?\]' "$PORTS_DIR/rustscan_raw.txt" 2>/dev/null > "$PORTS_DIR/rustscan_ports.txt" || true
     fi
 else
-    log_warn "RustScan not found"
+    log_warn "RustScan not found or no scan targets"
 fi
 
 # Nmap - Deep scan on discovered ports
-if command -v nmap &> /dev/null; then
+if command -v nmap &> /dev/null && [ "$TARGETS_COUNT" -gt 0 ]; then
     log_info "Running Nmap (deep service detection)..."
 
     # Full comprehensive Nmap scan
@@ -117,10 +122,12 @@ if command -v nmap &> /dev/null; then
         done < "$PORTS_DIR/targets.txt"
 
         # Merge all XML outputs
-        cat "$PORTS_DIR"/nmap_*.xml 2>/dev/null > "$PORTS_DIR/nmap_all.xml" || touch "$PORTS_DIR/nmap_all.xml"
+        if compgen -G "$PORTS_DIR/nmap_*.xml" > /dev/null; then
+            cat "$PORTS_DIR"/nmap_*.xml 2>/dev/null > "$PORTS_DIR/nmap_all.xml" || touch "$PORTS_DIR/nmap_all.xml"
+        fi
     fi
 else
-    log_warn "Nmap not found"
+    log_warn "Nmap not found or no scan targets"
 fi
 
 ################################################################################
@@ -133,7 +140,7 @@ OSINT_DIR="$PHASE_DIR/osint"
 mkdir -p "$OSINT_DIR"
 
 # Shodan CLI
-if command -v shodan &> /dev/null && [ ! -z "$SHODAN_API_KEY" ]; then
+if command -v shodan &> /dev/null && [ ! -z "$SHODAN_API_KEY" ] && [ "$ALIVE_COUNT" -gt 0 ]; then
     log_info "Running Shodan..."
 
     while IFS= read -r host; do
@@ -146,7 +153,7 @@ if command -v shodan &> /dev/null && [ ! -z "$SHODAN_API_KEY" ]; then
     # Merge results
     cat "$OSINT_DIR"/shodan_*.txt 2>/dev/null > "$OSINT_DIR/shodan_all.txt" || touch "$OSINT_DIR/shodan_all.txt"
 else
-    log_warn "Shodan CLI not found or SHODAN_API_KEY not set"
+    log_warn "Shodan CLI not found, SHODAN_API_KEY not set, or no scan hosts"
 fi
 
 # ShodanX (Revolt suite)
@@ -161,7 +168,7 @@ else
 fi
 
 # Censys CLI
-if command -v censys &> /dev/null && [ ! -z "$CENSYS_API_ID" ] && [ ! -z "$CENSYS_API_SECRET" ]; then
+if command -v censys &> /dev/null && [ ! -z "$CENSYS_API_ID" ] && [ ! -z "$CENSYS_API_SECRET" ] && [ "$ALIVE_COUNT" -gt 0 ]; then
     log_info "Running Censys..."
 
     while IFS= read -r host; do
@@ -173,11 +180,11 @@ if command -v censys &> /dev/null && [ ! -z "$CENSYS_API_ID" ] && [ ! -z "$CENSY
     # Merge results
     cat "$OSINT_DIR"/censys_*.json 2>/dev/null > "$OSINT_DIR/censys_all.json" || touch "$OSINT_DIR/censys_all.json"
 else
-    log_warn "Censys CLI not found or API credentials not set"
+    log_warn "Censys CLI not found, API credentials not set, or no scan hosts"
 fi
 
 # Additional OSINT: ASN Lookup
-if command -v whois &> /dev/null; then
+if command -v whois &> /dev/null && [ "$ALIVE_COUNT" -gt 0 ]; then
     log_info "Gathering ASN information..."
 
     # Get unique IPs from dnsx results
