@@ -57,6 +57,16 @@ mkdir -p "$TOOLS_DIR"
 log_section "Installing System Packages"
 
 if [ "$OS" = "kali" ] || [ "$OS" = "debian" ] || [ "$OS" = "ubuntu" ]; then
+    # Chromium package name varies by distro (kali/debian/ubuntu)
+    CHROMIUM_PKG=""
+    if apt-cache show chromium-browser >/dev/null 2>&1; then
+        CHROMIUM_PKG="chromium-browser"
+    elif apt-cache show chromium >/dev/null 2>&1; then
+        CHROMIUM_PKG="chromium"
+    else
+        log_warn "Chromium package not found; skipping browser install"
+    fi
+
     apt-get update
     apt-get install -y \
         python3 python3-pip python3-venv \
@@ -66,7 +76,7 @@ if [ "$OS" = "kali" ] || [ "$OS" = "debian" ] || [ "$OS" = "ubuntu" ]; then
         whois dnsutils \
         nmap masscan \
         nikto sqlmap \
-        chromium-browser \
+        $CHROMIUM_PKG \
         default-jre \
         nodejs npm \
         ruby ruby-dev \
