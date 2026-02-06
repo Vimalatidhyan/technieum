@@ -43,7 +43,6 @@ DNSX_THREADS="${RECONX_DNSX_THREADS:-100}"
 HTTPX_TIMEOUT="${RECONX_HTTPX_TIMEOUT:-15}"
 HTTPX_THREADS="${RECONX_HTTPX_THREADS:-100}"
 HTTPX_RUN_TIMEOUT="${RECONX_HTTPX_RUN_TIMEOUT:-3600}"
-CHAOS_TIMEOUT="${RECONX_CHAOS_TIMEOUT:-900}"
 CERTSPOTTER_TIMEOUT="${RECONX_CERTSPOTTER_TIMEOUT:-600}"
 CT_MONITOR_TIMEOUT="${RECONX_CT_MONITOR_TIMEOUT:-900}"
 ASNMAP_TIMEOUT="${RECONX_ASNMAP_TIMEOUT:-900}"
@@ -311,31 +310,7 @@ log_info "Launching crt.sh..."
 tool_pids[crtsh]=$!
 pids+=($!)
 
-# 6.1 Chaos (ProjectDiscovery CT)
-if command -v chaos &> /dev/null; then
-    CHAOS_API_KEY="${CHAOS_KEY:-${PDCP_API_KEY:-}}"
-    if [ -n "$CHAOS_API_KEY" ]; then
-        log_info "Launching Chaos (CT)..."
-        (
-            if tool_supports_flag "chaos" "-key"; then
-                timeout "$CHAOS_TIMEOUT" chaos -d "$TARGET" -silent -key "$CHAOS_API_KEY" > "$CT_DIR/chaos.txt" 2>/dev/null || touch "$CT_DIR/chaos.txt"
-            else
-                timeout "$CHAOS_TIMEOUT" chaos -d "$TARGET" -silent > "$CT_DIR/chaos.txt" 2>/dev/null || touch "$CT_DIR/chaos.txt"
-            fi
-        ) &
-        tool_pids[chaos]=$!
-        pids+=($!)
-    else
-        log_warn "Chaos API key not set; skipping Chaos"
-        touch "$CT_DIR/chaos.txt"
-        ((TOOLS_SKIPPED++))
-    fi
-else
-    log_warn "Chaos not found"
-    ((TOOLS_SKIPPED++))
-fi
-
-# 6.2 CertSpotter (CT API)
+# 6.1 CertSpotter (CT API)
 log_info "Launching CertSpotter..."
 (
     timeout "$CERTSPOTTER_TIMEOUT" bash -c "
@@ -347,7 +322,7 @@ log_info "Launching CertSpotter..."
 tool_pids[certspotter]=$!
 pids+=($!)
 
-# 6.3 ct-monitor (optional)
+# 6.2 ct-monitor (optional)
 if command -v ct-monitor &> /dev/null; then
     log_info "Launching ct-monitor..."
     (
@@ -407,7 +382,6 @@ log_info "Passive enumeration completed (Success: $TOOLS_SUCCESS, Failed: $TOOLS
 log_info "Merging subdomain results..."
 safe_cat "$PHASE_DIR/passive_subdomains_raw.txt" \
     "$TEMP_SUBS"/*.txt \
-    "$CT_DIR/chaos.txt" \
     "$CT_DIR/certspotter.txt" \
     "$CT_DIR/ct_monitor.txt"
 

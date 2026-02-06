@@ -206,7 +206,6 @@ go install -v github.com/tomnomnom/assetfinder@latest
 go install -v github.com/owasp-amass/amass/v4/...@master
 
 # Certificate Transparency / ASN / Cloud
-go install -v github.com/projectdiscovery/chaos-client/cmd/chaos@latest
 go install -v github.com/projectdiscovery/asnmap/cmd/asnmap@latest
 go install -v github.com/projectdiscovery/mapcidr/cmd/mapcidr@latest
 go install -v github.com/tomnomnom/goblob@latest
@@ -568,7 +567,7 @@ log_section "Verifying Installation"
 
 TOOLS=(
     "subfinder" "assetfinder" "amass"
-    "chaos" "asnmap" "mapcidr"
+    "asnmap" "mapcidr"
     "dnsx" "httpx"
     "gau" "waybackurls" "hakrawler" "katana"
     "ffuf" "feroxbuster"
@@ -626,10 +625,6 @@ ReconX requires API keys for certain services. Please configure them:
 
    # SecurityTrails
    export SECURITYTRAILS_API_KEY="your_securitytrails_key"
-
-   # Chaos (ProjectDiscovery CT)
-   export CHAOS_KEY="your_chaos_key"
-   export PDCP_API_KEY="your_chaos_key"
 
    # Pastebin
    export PASTEBIN_API_KEY="your_pastebin_key"
