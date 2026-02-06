@@ -43,6 +43,10 @@ log_warn() {
 RUSTSCAN_BATCH="${RECONX_RUSTSCAN_BATCH:-1000}"
 RUSTSCAN_TIMEOUT="${RECONX_RUSTSCAN_TIMEOUT:-3000}"
 SUBJACK_THREADS="${RECONX_SUBJACK_THREADS:-100}"
+NMAP_MAX_HOSTS="${RECONX_NMAP_MAX_HOSTS:-50}"
+NMAP_HOST_TIMEOUT="${RECONX_NMAP_HOST_TIMEOUT:-600}"
+NMAP_MAX_FILE_MB="${RECONX_NMAP_MAX_FILE_MB:-500}"
+MIN_DISK_MB="${RECONX_MIN_DISK_MB:-1024}"
 
 safe_cat() {
     local output_file="$1"
@@ -61,6 +65,17 @@ safe_cat() {
 
 safe_grep() {
     grep "$@" || true
+}
+
+check_disk_space() {
+    local dir="$1"
+    local avail_kb
+    avail_kb=$(df -k "$dir" 2>/dev/null | awk 'NR==2{print $4}')
+    if [ -n "$avail_kb" ] && [ "$avail_kb" -lt $((MIN_DISK_MB * 1024)) ]; then
+        log_error "Low disk space: $(( avail_kb / 1024 ))MB free (minimum: ${MIN_DISK_MB}MB). Stopping scan."
+        return 1
+    fi
+    return 0
 }
 
 run_shodanx_mode() {
@@ -243,20 +258,58 @@ fi
 if command -v nmap &> /dev/null && [ "$TARGETS_COUNT" -gt 0 ]; then
     log_info "Running Nmap (deep service detection)..."
 
-    # Full comprehensive Nmap scan
-    if [ -f "$PORTS_DIR/targets.txt" ]; then
-        while IFS= read -r host; do
-            log_info "Nmap: $host"
-            nmap -sV -sC -T4 -Pn -p- "$host" \
-                -oX "$PORTS_DIR/nmap_${host//[^a-zA-Z0-9]/_}.xml" \
-                -oN "$PORTS_DIR/nmap_${host//[^a-zA-Z0-9]/_}.txt" \
-                2>/dev/null || log_warn "Nmap failed for $host"
-        done < "$PORTS_DIR/targets.txt"
+    # Cap target count to prevent runaway scans
+    NMAP_TARGETS="$PORTS_DIR/nmap_targets.txt"
+    head -n "$NMAP_MAX_HOSTS" "$PORTS_DIR/targets.txt" > "$NMAP_TARGETS"
+    NMAP_TARGET_COUNT=$(wc -l < "$NMAP_TARGETS" | tr -d ' ')
+    if [ "$TARGETS_COUNT" -gt "$NMAP_MAX_HOSTS" ]; then
+        log_warn "Capping Nmap from $TARGETS_COUNT to $NMAP_MAX_HOSTS hosts (set RECONX_NMAP_MAX_HOSTS to change)"
+    fi
 
-        # Merge all XML outputs into a single valid XML (host nodes only)
+    # Build smart port list from RustScan results if available
+    NMAP_PORT_FLAG="-p-"
+    if [ -f "$PORTS_DIR/rustscan_ports.txt" ] && [ -s "$PORTS_DIR/rustscan_ports.txt" ]; then
+        DISCOVERED_PORTS=$(grep -oP ':\K\d+' "$PORTS_DIR/rustscan_ports.txt" 2>/dev/null | sort -un | paste -sd, -)
+        if [ -n "$DISCOVERED_PORTS" ]; then
+            NMAP_PORT_FLAG="-p $DISCOVERED_PORTS"
+            log_info "Using RustScan-discovered ports: $DISCOVERED_PORTS"
+        fi
+    fi
+
+    if [ -f "$NMAP_TARGETS" ]; then
+        NMAP_HOST_NUM=0
+        while IFS= read -r host; do
+            NMAP_HOST_NUM=$((NMAP_HOST_NUM + 1))
+
+            # Check disk space before each host
+            if ! check_disk_space "$PORTS_DIR"; then
+                log_error "Aborting Nmap due to low disk space"
+                break
+            fi
+
+            log_info "Nmap ($NMAP_HOST_NUM/$NMAP_TARGET_COUNT): $host"
+            timeout "${NMAP_HOST_TIMEOUT}s" \
+                nmap -sV -sC -T4 -Pn $NMAP_PORT_FLAG --host-timeout "${NMAP_HOST_TIMEOUT}s" "$host" \
+                -oX "$PORTS_DIR/nmap_host_${host//[^a-zA-Z0-9]/_}.xml" \
+                -oN "$PORTS_DIR/nmap_host_${host//[^a-zA-Z0-9]/_}.txt" \
+                2>/dev/null || log_warn "Nmap failed/timed out for $host"
+
+            # Check per-host XML size — abort if a single file exceeds limit
+            HOST_XML="$PORTS_DIR/nmap_host_${host//[^a-zA-Z0-9]/_}.xml"
+            if [ -f "$HOST_XML" ]; then
+                FILE_SIZE_MB=$(( $(stat -c%s "$HOST_XML" 2>/dev/null || stat -f%z "$HOST_XML" 2>/dev/null || echo 0) / 1048576 ))
+                if [ "$FILE_SIZE_MB" -gt "$NMAP_MAX_FILE_MB" ]; then
+                    log_error "Nmap XML for $host is ${FILE_SIZE_MB}MB (limit: ${NMAP_MAX_FILE_MB}MB) — removing and stopping"
+                    rm -f "$HOST_XML"
+                    break
+                fi
+            fi
+        done < "$NMAP_TARGETS"
+
+        # Merge per-host XMLs into nmap_all.xml (exclude nmap_all.xml itself)
         echo '<?xml version="1.0" encoding="UTF-8"?>' > "$PORTS_DIR/nmap_all.xml"
         echo '<nmaprun>' >> "$PORTS_DIR/nmap_all.xml"
-        for xml_file in "$PORTS_DIR"/nmap_*.xml; do
+        for xml_file in "$PORTS_DIR"/nmap_host_*.xml; do
             if [ -f "$xml_file" ] && [ -s "$xml_file" ]; then
                 sed -n '/<host /,/<\/host>/p' "$xml_file" >> "$PORTS_DIR/nmap_all.xml"
                 sed -n '/<host>/,/<\/host>/p' "$xml_file" >> "$PORTS_DIR/nmap_all.xml"
