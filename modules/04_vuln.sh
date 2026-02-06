@@ -373,9 +373,18 @@ if command -v skipfish &> /dev/null; then
         SKIPFISH_DICT="/usr/share/skipfish/dictionaries/complete.wl"
     fi
 
-    SKIPFISH_TIME="${RECONX_SKIPFISH_TIME:-1:30:00}"
+    # Skipfish performance tuning (faster defaults)
+    SKIPFISH_TIME="${RECONX_SKIPFISH_TIME:-1:00:00}"
     SKIPFISH_RPS="${RECONX_SKIPFISH_RPS:-30}"
     SKIPFISH_MAX_HOSTS="${RECONX_SKIPFISH_MAX_HOSTS:-3}"
+    SKIPFISH_CONN_GLOBAL="${RECONX_SKIPFISH_CONN_GLOBAL:-30}"
+    SKIPFISH_CONN_PERIP="${RECONX_SKIPFISH_CONN_PERIP:-10}"
+    SKIPFISH_REQ_TIMEOUT="${RECONX_SKIPFISH_REQ_TIMEOUT:-10}"
+    SKIPFISH_DEPTH="${RECONX_SKIPFISH_DEPTH:-4}"
+    SKIPFISH_CHILDREN="${RECONX_SKIPFISH_CHILDREN:-20}"
+    SKIPFISH_MAX_REQUESTS="${RECONX_SKIPFISH_MAX_REQUESTS:-5000}"
+    SKIPFISH_MAX_DESC="${RECONX_SKIPFISH_MAX_DESC:-1000}"
+    SKIPFISH_PARTIAL="${RECONX_SKIPFISH_PARTIAL:-90}"
 
     if [ -z "$SKIPFISH_DICT" ]; then
         log_warn "Skipfish dictionary not found; skipping Skipfish"
@@ -385,7 +394,18 @@ if command -v skipfish &> /dev/null; then
         while IFS= read -r host; do
             log_info "Skipfish: $host"
             out_dir="$SKIPFISH_DIR/skipfish_${host//[^a-zA-Z0-9]/_}"
-            run_with_timeout "$TIMEOUT_DEFAULT" "skipfish -l $SKIPFISH_RPS -k $SKIPFISH_TIME -S '$SKIPFISH_DICT' -W - -o '$out_dir' 'https://$host/'" || log_warn "Skipfish failed for $host"
+            run_with_timeout "$TIMEOUT_DEFAULT" "skipfish \
+                -l $SKIPFISH_RPS \
+                -k $SKIPFISH_TIME \
+                -g $SKIPFISH_CONN_GLOBAL \
+                -m $SKIPFISH_CONN_PERIP \
+                -t $SKIPFISH_REQ_TIMEOUT \
+                -d $SKIPFISH_DEPTH \
+                -c $SKIPFISH_CHILDREN \
+                -r $SKIPFISH_MAX_REQUESTS \
+                -x $SKIPFISH_MAX_DESC \
+                -p $SKIPFISH_PARTIAL \
+                -S '$SKIPFISH_DICT' -W - -o '$out_dir' 'https://$host/'" || log_warn "Skipfish failed for $host"
         done < "$SKIPFISH_DIR/skipfish_targets.txt"
     fi
 else
