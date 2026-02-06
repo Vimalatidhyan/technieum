@@ -43,6 +43,17 @@ DNSX_THREADS="${RECONX_DNSX_THREADS:-100}"
 HTTPX_TIMEOUT="${RECONX_HTTPX_TIMEOUT:-15}"
 HTTPX_THREADS="${RECONX_HTTPX_THREADS:-100}"
 HTTPX_RUN_TIMEOUT="${RECONX_HTTPX_RUN_TIMEOUT:-3600}"
+CHAOS_TIMEOUT="${RECONX_CHAOS_TIMEOUT:-900}"
+CERTSPOTTER_TIMEOUT="${RECONX_CERTSPOTTER_TIMEOUT:-600}"
+CT_MONITOR_TIMEOUT="${RECONX_CT_MONITOR_TIMEOUT:-900}"
+ASNMAP_TIMEOUT="${RECONX_ASNMAP_TIMEOUT:-900}"
+MAPCIDR_TIMEOUT="${RECONX_MAPCIDR_TIMEOUT:-1200}"
+CLOUD_ENUM_TIMEOUT="${RECONX_CLOUD_ENUM_TIMEOUT:-1800}"
+S3SCANNER_TIMEOUT="${RECONX_S3SCANNER_TIMEOUT:-1800}"
+GOBLOB_TIMEOUT="${RECONX_GOBLOB_TIMEOUT:-1800}"
+GCPBRUTE_TIMEOUT="${RECONX_GCPBRUTE_TIMEOUT:-1800}"
+CLOUD_THREADS="${RECONX_CLOUD_THREADS:-30}"
+CLOUD_KEYWORDS_LIMIT="${RECONX_CLOUD_KEYWORDS_LIMIT:-400}"
 
 echo "[*] Phase 1: Discovery & Enumeration for $TARGET"
 echo "[*] Output directory: $PHASE_DIR"
@@ -131,6 +142,16 @@ safe_grep() {
     grep "$@" || true
 }
 
+# Check if a tool supports a specific flag
+tool_supports_flag() {
+    local tool="$1"
+    local flag="$2"
+    if ! command -v "$tool" &> /dev/null; then
+        return 1
+    fi
+    "$tool" -h 2>&1 | grep -q -- "$flag"
+}
+
 ################################################################################
 # PHASE 1A: HORIZONTAL DISCOVERY (Acquisitions)
 ################################################################################
@@ -179,6 +200,10 @@ log_info "=== VERTICAL DISCOVERY (SUBDOMAIN ENUMERATION) ==="
 # Create temp directory for individual tool outputs
 TEMP_SUBS="$PHASE_DIR/temp_subdomains"
 mkdir -p "$TEMP_SUBS"
+
+# Certificate Transparency (CT) outputs
+CT_DIR="$PHASE_DIR/ct"
+mkdir -p "$CT_DIR"
 
 # Launch all subdomain enumeration tools in parallel with proper error handling
 pids=()
@@ -286,6 +311,67 @@ log_info "Launching crt.sh..."
 tool_pids[crtsh]=$!
 pids+=($!)
 
+# 6.1 Chaos (ProjectDiscovery CT)
+if command -v chaos &> /dev/null; then
+    if [ -n "$CHAOS_KEY" ]; then
+        log_info "Launching Chaos (CT)..."
+        (
+            if tool_supports_flag "chaos" "-key"; then
+                timeout "$CHAOS_TIMEOUT" chaos -d "$TARGET" -silent -key "$CHAOS_KEY" > "$CT_DIR/chaos.txt" 2>/dev/null || touch "$CT_DIR/chaos.txt"
+            else
+                timeout "$CHAOS_TIMEOUT" chaos -d "$TARGET" -silent > "$CT_DIR/chaos.txt" 2>/dev/null || touch "$CT_DIR/chaos.txt"
+            fi
+        ) &
+        tool_pids[chaos]=$!
+        pids+=($!)
+    else
+        log_warn "Chaos API key not set; skipping Chaos"
+        touch "$CT_DIR/chaos.txt"
+        ((TOOLS_SKIPPED++))
+    fi
+else
+    log_warn "Chaos not found"
+    ((TOOLS_SKIPPED++))
+fi
+
+# 6.2 CertSpotter (CT API)
+log_info "Launching CertSpotter..."
+(
+    timeout "$CERTSPOTTER_TIMEOUT" bash -c "
+        curl -s 'https://api.certspotter.com/v1/issuances?domain=$TARGET&include_subdomains=true&expand=dns_names' 2>/dev/null | \
+            jq -r '.[].dns_names[]' 2>/dev/null | \
+            sed 's/\\*\\.//g' | sort -u > '$CT_DIR/certspotter.txt'
+    " || touch "$CT_DIR/certspotter.txt"
+) &
+tool_pids[certspotter]=$!
+pids+=($!)
+
+# 6.3 ct-monitor (optional)
+if command -v ct-monitor &> /dev/null; then
+    log_info "Launching ct-monitor..."
+    (
+        CT_CMD="ct-monitor '$TARGET'"
+        if tool_supports_flag "ct-monitor" "--domain"; then
+            CT_CMD="ct-monitor --domain '$TARGET'"
+        elif tool_supports_flag "ct-monitor" "-d"; then
+            CT_CMD="ct-monitor -d '$TARGET'"
+        fi
+
+        timeout "$CT_MONITOR_TIMEOUT" bash -c "$CT_CMD" > "$CT_DIR/ct_monitor_raw.txt" 2>/dev/null || true
+        if [ -s "$CT_DIR/ct_monitor_raw.txt" ]; then
+            safe_grep -E '[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9-]{1,})+\\.[a-zA-Z]{2,}' "$CT_DIR/ct_monitor_raw.txt" | \
+                sed 's/\\*\\.//g' | sort -u > "$CT_DIR/ct_monitor.txt" || touch "$CT_DIR/ct_monitor.txt"
+        else
+            touch "$CT_DIR/ct_monitor.txt"
+        fi
+    ) &
+    tool_pids[ctmonitor]=$!
+    pids+=($!)
+else
+    log_warn "ct-monitor not found"
+    ((TOOLS_SKIPPED++))
+fi
+
 # 7. SecurityTrails (if API key is set)
 if [ ! -z "$SECURITYTRAILS_API_KEY" ]; then
     log_info "Launching SecurityTrails..."
@@ -318,7 +404,11 @@ log_info "Passive enumeration completed (Success: $TOOLS_SUCCESS, Failed: $TOOLS
 
 # Merge all subdomain outputs with safe operations
 log_info "Merging subdomain results..."
-safe_cat "$PHASE_DIR/passive_subdomains_raw.txt" "$TEMP_SUBS"/*.txt
+safe_cat "$PHASE_DIR/passive_subdomains_raw.txt" \
+    "$TEMP_SUBS"/*.txt \
+    "$CT_DIR/chaos.txt" \
+    "$CT_DIR/certspotter.txt" \
+    "$CT_DIR/ct_monitor.txt"
 
 # Filter and validate subdomains
 if [ -s "$PHASE_DIR/passive_subdomains_raw.txt" ]; then
@@ -397,7 +487,44 @@ TOTAL_SUBS=$(wc -l < "$PHASE_DIR/all_subdomains.txt" 2>/dev/null | tr -d ' ')
 log_info "Total unique subdomains found: $TOTAL_SUBS"
 
 ################################################################################
-# PHASE 1D: DNS RESOLUTION
+# PHASE 1D: ASN EXPANSION
+################################################################################
+
+log_info "=== ASN EXPANSION ==="
+ASN_DIR="$PHASE_DIR/asn"
+mkdir -p "$ASN_DIR"
+
+ASN_CIDRS_FILE="$ASN_DIR/asn_cidrs.txt"
+ASN_IPS_FILE="$ASN_DIR/asn_ips.txt"
+
+if command -v asnmap &> /dev/null; then
+    log_info "Running asnmap to discover CIDRs..."
+    ASN_CMD="asnmap -silent '$TARGET' > '$ASN_CIDRS_FILE'"
+    if tool_supports_flag "asnmap" "-d"; then
+        ASN_CMD="asnmap -d '$TARGET' -silent > '$ASN_CIDRS_FILE'"
+    fi
+    timeout "$ASNMAP_TIMEOUT" bash -c "$ASN_CMD" 2>"$ASN_DIR/asnmap.err" || log_warn "asnmap failed or timed out"
+else
+    log_warn "asnmap not found"
+    ((TOOLS_SKIPPED++))
+fi
+
+if [ -s "$ASN_CIDRS_FILE" ] && command -v mapcidr &> /dev/null; then
+    log_info "Expanding ASN CIDRs to IPs..."
+    MAP_CMD="mapcidr < '$ASN_CIDRS_FILE' > '$ASN_IPS_FILE'"
+    if tool_supports_flag "mapcidr" "-silent"; then
+        MAP_CMD="mapcidr -silent < '$ASN_CIDRS_FILE' > '$ASN_IPS_FILE'"
+    fi
+    timeout "$MAPCIDR_TIMEOUT" bash -c "$MAP_CMD" 2>"$ASN_DIR/mapcidr.err" || log_warn "mapcidr failed or timed out"
+else
+    touch "$ASN_IPS_FILE"
+fi
+
+ASN_IP_COUNT=$(wc -l < "$ASN_IPS_FILE" 2>/dev/null | tr -d ' ')
+log_info "ASN-derived IPs: ${ASN_IP_COUNT:-0}"
+
+################################################################################
+# PHASE 1E: DNS RESOLUTION
 ################################################################################
 
 log_info "=== DNS RESOLUTION ==="
@@ -428,17 +555,25 @@ RESOLVED_COUNT=$(wc -l < "$PHASE_DIR/resolved_subdomains.txt" 2>/dev/null | tr -
 log_info "Resolved subdomains: $RESOLVED_COUNT"
 
 ################################################################################
-# PHASE 1E: HTTP VALIDATION
+# PHASE 1F: HTTP VALIDATION
 ################################################################################
 
 log_info "=== HTTP VALIDATION ==="
 
-# Only proceed if we have resolved subdomains
-if [ "$RESOLVED_COUNT" -gt 0 ] && [ -s "$PHASE_DIR/resolved_subdomains.txt" ]; then
+# Build HTTPx targets (resolved subdomains + ASN IPs)
+HTTPX_TARGETS="$PHASE_DIR/httpx_targets.txt"
+safe_cat "$HTTPX_TARGETS" "$PHASE_DIR/resolved_subdomains.txt" "$ASN_IPS_FILE"
+if [ -s "$HTTPX_TARGETS" ]; then
+    sort -u "$HTTPX_TARGETS" > "$HTTPX_TARGETS.tmp" 2>/dev/null || true
+    mv "$HTTPX_TARGETS.tmp" "$HTTPX_TARGETS" 2>/dev/null || true
+fi
+
+# Only proceed if we have targets
+if [ -s "$HTTPX_TARGETS" ]; then
     # HTTPx for live host detection
     if command -v httpx &> /dev/null; then
         log_info "Running HTTPx to find alive hosts..."
-        timeout "$HTTPX_RUN_TIMEOUT" bash -c "cat '$PHASE_DIR/resolved_subdomains.txt' | httpx -silent -json -status-code -follow-redirects -threads $HTTPX_THREADS -timeout $HTTPX_TIMEOUT -o '$PHASE_DIR/httpx_alive.json'" 2>/dev/null || log_warn "HTTPx failed or timed out"
+        timeout "$HTTPX_RUN_TIMEOUT" bash -c "cat '$HTTPX_TARGETS' | httpx -silent -json -status-code -follow-redirects -threads $HTTPX_THREADS -timeout $HTTPX_TIMEOUT -o '$PHASE_DIR/httpx_alive.json'" 2>/dev/null || log_warn "HTTPx failed or timed out"
 
         # Extract alive hosts
         if [ -f "$PHASE_DIR/httpx_alive.json" ] && [ -s "$PHASE_DIR/httpx_alive.json" ]; then
@@ -447,26 +582,119 @@ if [ "$RESOLVED_COUNT" -gt 0 ] && [ -s "$PHASE_DIR/resolved_subdomains.txt" ]; t
 
             ALIVE_COUNT=$(wc -l < "$PHASE_DIR/alive_hosts.txt" 2>/dev/null | tr -d ' ')
             if [ "$ALIVE_COUNT" -eq 0 ]; then
-                log_warn "HTTPx parsed but no alive hosts; falling back to resolved subdomains"
-                cp "$PHASE_DIR/resolved_subdomains.txt" "$PHASE_DIR/alive_hosts.txt" 2>/dev/null || touch "$PHASE_DIR/alive_hosts.txt"
+                log_warn "HTTPx parsed but no alive hosts; falling back to HTTPx targets"
+                cp "$HTTPX_TARGETS" "$PHASE_DIR/alive_hosts.txt" 2>/dev/null || touch "$PHASE_DIR/alive_hosts.txt"
                 ALIVE_COUNT=$(wc -l < "$PHASE_DIR/alive_hosts.txt" 2>/dev/null | tr -d ' ')
             fi
             log_info "Alive hosts: $ALIVE_COUNT"
         else
-            log_warn "HTTPx produced no output; falling back to resolved subdomains"
-            cp "$PHASE_DIR/resolved_subdomains.txt" "$PHASE_DIR/alive_hosts.txt" 2>/dev/null || touch "$PHASE_DIR/alive_hosts.txt"
+            log_warn "HTTPx produced no output; falling back to HTTPx targets"
+            cp "$HTTPX_TARGETS" "$PHASE_DIR/alive_hosts.txt" 2>/dev/null || touch "$PHASE_DIR/alive_hosts.txt"
             ALIVE_COUNT=$(wc -l < "$PHASE_DIR/alive_hosts.txt" 2>/dev/null | tr -d ' ')
             log_info "Alive hosts (fallback): $ALIVE_COUNT"
         fi
     else
         log_warn "HTTPx not found, skipping live validation"
-        cp "$PHASE_DIR/resolved_subdomains.txt" "$PHASE_DIR/alive_hosts.txt" 2>/dev/null || touch "$PHASE_DIR/alive_hosts.txt"
+        cp "$HTTPX_TARGETS" "$PHASE_DIR/alive_hosts.txt" 2>/dev/null || touch "$PHASE_DIR/alive_hosts.txt"
         ALIVE_COUNT=$(wc -l < "$PHASE_DIR/alive_hosts.txt" 2>/dev/null | tr -d ' ')
     fi
 else
-    log_warn "No resolved subdomains to validate"
+    log_warn "No HTTP validation targets"
     touch "$PHASE_DIR/alive_hosts.txt"
     ALIVE_COUNT=0
+fi
+
+################################################################################
+# PHASE 1G: CLOUD EXPOSURE CHECKS
+################################################################################
+
+log_info "=== CLOUD EXPOSURE CHECKS ==="
+CLOUD_DIR="$PHASE_DIR/cloud"
+mkdir -p "$CLOUD_DIR"
+CLOUD_KEYWORDS="$CLOUD_DIR/keywords.txt"
+
+{
+    echo "$TARGET"
+    echo "${TARGET//./-}"
+    echo "${TARGET//./}"
+    echo "$(echo "$TARGET" | cut -d. -f1)"
+    if [ -s "$PHASE_DIR/all_subdomains.txt" ]; then
+        head -n "$CLOUD_KEYWORDS_LIMIT" "$PHASE_DIR/all_subdomains.txt" | sed 's/\\./-/g'
+        head -n "$CLOUD_KEYWORDS_LIMIT" "$PHASE_DIR/all_subdomains.txt" | awk -F. '{print $1}'
+    fi
+} | tr 'A-Z' 'a-z' | sort -u > "$CLOUD_KEYWORDS"
+
+if [ -s "$CLOUD_KEYWORDS" ]; then
+    if command -v cloud_enum &> /dev/null; then
+        log_info "Running cloud_enum..."
+        if tool_supports_flag "cloud_enum" "-l"; then
+            timeout "$CLOUD_ENUM_TIMEOUT" cloud_enum -l "$CLOUD_KEYWORDS" -t "$CLOUD_THREADS" > "$CLOUD_DIR/cloud_enum.txt" 2>/dev/null || log_warn "cloud_enum failed"
+        elif tool_supports_flag "cloud_enum" "-k"; then
+            timeout "$CLOUD_ENUM_TIMEOUT" cloud_enum -k "$TARGET" -t "$CLOUD_THREADS" > "$CLOUD_DIR/cloud_enum.txt" 2>/dev/null || log_warn "cloud_enum failed"
+        else
+            timeout "$CLOUD_ENUM_TIMEOUT" cloud_enum "$TARGET" > "$CLOUD_DIR/cloud_enum.txt" 2>/dev/null || log_warn "cloud_enum failed"
+        fi
+    else
+        log_warn "cloud_enum not found"
+        touch "$CLOUD_DIR/cloud_enum.txt"
+    fi
+
+    if command -v s3scanner &> /dev/null; then
+        log_info "Running S3Scanner..."
+        if tool_supports_flag "s3scanner" "-l"; then
+            timeout "$S3SCANNER_TIMEOUT" s3scanner -l "$CLOUD_KEYWORDS" -o "$CLOUD_DIR/s3scanner.txt" 2>/dev/null || log_warn "S3Scanner failed"
+        else
+            timeout "$S3SCANNER_TIMEOUT" s3scanner "$CLOUD_KEYWORDS" "$CLOUD_DIR/s3scanner.txt" 2>/dev/null || log_warn "S3Scanner failed"
+        fi
+    else
+        log_warn "S3Scanner not found"
+        touch "$CLOUD_DIR/s3scanner.txt"
+    fi
+
+    if command -v goblob &> /dev/null; then
+        log_info "Running goblob..."
+        if tool_supports_flag "goblob" "-w"; then
+            timeout "$GOBLOB_TIMEOUT" goblob -w "$CLOUD_KEYWORDS" -o "$CLOUD_DIR/goblob.txt" 2>/dev/null || log_warn "goblob failed"
+        else
+            timeout "$GOBLOB_TIMEOUT" goblob "$CLOUD_KEYWORDS" > "$CLOUD_DIR/goblob.txt" 2>/dev/null || log_warn "goblob failed"
+        fi
+    else
+        log_warn "goblob not found"
+        touch "$CLOUD_DIR/goblob.txt"
+    fi
+
+    if command -v gcpbucketbrute &> /dev/null; then
+        log_info "Running GCPBucketBrute..."
+        if tool_supports_flag "gcpbucketbrute" "-w"; then
+            timeout "$GCPBRUTE_TIMEOUT" gcpbucketbrute -w "$CLOUD_KEYWORDS" -o "$CLOUD_DIR/gcpbucketbrute.txt" 2>/dev/null || log_warn "GCPBucketBrute failed"
+        else
+            timeout "$GCPBRUTE_TIMEOUT" gcpbucketbrute "$CLOUD_KEYWORDS" > "$CLOUD_DIR/gcpbucketbrute.txt" 2>/dev/null || log_warn "GCPBucketBrute failed"
+        fi
+    else
+        log_warn "GCPBucketBrute not found"
+        touch "$CLOUD_DIR/gcpbucketbrute.txt"
+    fi
+else
+    log_warn "No cloud keywords generated; skipping cloud exposure checks"
+fi
+
+safe_cat "$CLOUD_DIR/cloud_assets_raw.txt" \
+    "$CLOUD_DIR/cloud_enum.txt" \
+    "$CLOUD_DIR/s3scanner.txt" \
+    "$CLOUD_DIR/goblob.txt" \
+    "$CLOUD_DIR/gcpbucketbrute.txt"
+
+if [ -s "$CLOUD_DIR/cloud_assets_raw.txt" ]; then
+    safe_grep -Ei 's3://|amazonaws\\.com|blob\\.core\\.windows\\.net|azureedge\\.net|storage\\.googleapis\\.com' \
+        "$CLOUD_DIR/cloud_assets_raw.txt" | sort -u > "$CLOUD_DIR/cloud_assets.txt" || touch "$CLOUD_DIR/cloud_assets.txt"
+else
+    touch "$CLOUD_DIR/cloud_assets.txt"
+fi
+
+if [ -s "$CLOUD_DIR/cloud_assets.txt" ]; then
+    CLOUD_FINDINGS=$(wc -l < "$CLOUD_DIR/cloud_assets.txt" 2>/dev/null | tr -d ' ')
+else
+    CLOUD_FINDINGS=0
 fi
 
 ################################################################################
@@ -478,6 +706,8 @@ echo "Target: $TARGET"
 echo "Total Subdomains: $TOTAL_SUBS"
 echo "Resolved: $RESOLVED_COUNT"
 echo "Alive Hosts: ${ALIVE_COUNT:-0}"
+echo "ASN IPs: ${ASN_IP_COUNT:-0}"
+echo "Cloud Findings: ${CLOUD_FINDINGS:-0}"
 echo "Tools Success: $TOOLS_SUCCESS"
 echo "Tools Failed: $TOOLS_FAILED"
 echo "Tools Skipped: $TOOLS_SKIPPED"
@@ -486,8 +716,12 @@ echo "Output files:"
 echo "  - all_subdomains.txt: All discovered subdomains"
 echo "  - resolved_subdomains.txt: DNS-resolved subdomains"
 echo "  - alive_hosts.txt: Live HTTP/HTTPS hosts"
+echo "  - httpx_targets.txt: HTTP validation targets (domains + IPs)"
 echo "  - httpx_alive.json: Detailed HTTPx results"
 echo "  - dnsx_resolved.json: Detailed DNSx results"
+echo "  - ct/: Certificate Transparency sources"
+echo "  - asn/: ASN CIDR and IP expansion"
+echo "  - cloud/: Cloud exposure checks"
 
 # Create phase completion marker
 touch "$PHASE_DIR/.completed"

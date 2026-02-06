@@ -205,6 +205,12 @@ go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install -v github.com/tomnomnom/assetfinder@latest
 go install -v github.com/owasp-amass/amass/v4/...@master
 
+# Certificate Transparency / ASN / Cloud
+go install -v github.com/projectdiscovery/chaos-client/cmd/chaos@latest
+go install -v github.com/projectdiscovery/asnmap/cmd/asnmap@latest
+go install -v github.com/projectdiscovery/mapcidr/cmd/mapcidr@latest
+go install -v github.com/tomnomnom/goblob@latest
+
 # DNS Tools
 go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
 
@@ -356,6 +362,36 @@ if [ -d "$INSTALL_DIR/Dnsbruter" ]; then
     ln -sfn "$INSTALL_DIR/Dnsbruter" "$INSTALL_DIR/dnsbruter" || true
 fi
 
+# Cloud enumeration tools
+log_info "Installing cloud_enum..."
+git_clone_or_pull "https://github.com/initstring/cloud_enum.git" "$INSTALL_DIR/cloud_enum"
+if [ -d "$INSTALL_DIR/cloud_enum" ]; then
+    cd "$INSTALL_DIR/cloud_enum" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    if [ -f "$INSTALL_DIR/cloud_enum/cloud_enum.py" ]; then
+        create_py_wrapper "cloud_enum" "$INSTALL_DIR/cloud_enum/cloud_enum.py" || true
+    fi
+fi
+
+log_info "Installing S3Scanner..."
+git_clone_or_pull "https://github.com/sa7mon/S3Scanner.git" "$INSTALL_DIR/S3Scanner"
+if [ -d "$INSTALL_DIR/S3Scanner" ]; then
+    cd "$INSTALL_DIR/S3Scanner" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    if [ -f "$INSTALL_DIR/S3Scanner/s3scanner.py" ]; then
+        create_py_wrapper "s3scanner" "$INSTALL_DIR/S3Scanner/s3scanner.py" || true
+    elif [ -f "$INSTALL_DIR/S3Scanner/S3Scanner.py" ]; then
+        create_py_wrapper "s3scanner" "$INSTALL_DIR/S3Scanner/S3Scanner.py" || true
+    fi
+fi
+
+log_info "Installing GCPBucketBrute..."
+git_clone_or_pull "https://github.com/RhinoSecurityLabs/GCPBucketBrute.git" "$INSTALL_DIR/GCPBucketBrute"
+if [ -d "$INSTALL_DIR/GCPBucketBrute" ]; then
+    cd "$INSTALL_DIR/GCPBucketBrute" && [ -f requirements.txt ] && "$PIP_CMD" install -r requirements.txt || true
+    if [ -f "$INSTALL_DIR/GCPBucketBrute/gcpbucketbrute.py" ]; then
+        create_py_wrapper "gcpbucketbrute" "$INSTALL_DIR/GCPBucketBrute/gcpbucketbrute.py" || true
+    fi
+fi
+
 # Dirsearch
 log_info "Installing Dirsearch..."
 git_clone_or_pull "https://github.com/maurosoria/dirsearch.git" "$INSTALL_DIR/dirsearch"
@@ -474,6 +510,10 @@ log_info "Installing Shodan CLI..."
 log_info "Installing Censys CLI..."
 "$PIP_CMD" install censys || log_warn "Censys install failed"
 
+# ct-monitor (optional)
+log_info "Installing ct-monitor..."
+"$PIP_CMD" install ct-monitor || log_warn "ct-monitor install failed"
+
 # Newman (Postman CLI)
 log_info "Installing Newman..."
 npm install -g newman || log_warn "Newman install failed"
@@ -528,6 +568,7 @@ log_section "Verifying Installation"
 
 TOOLS=(
     "subfinder" "assetfinder" "amass"
+    "chaos" "asnmap" "mapcidr"
     "dnsx" "httpx"
     "gau" "waybackurls" "hakrawler" "katana"
     "ffuf" "feroxbuster"
@@ -535,6 +576,7 @@ TOOLS=(
     "subjack" "gitleaks"
     "nmap" "sqlmap" "nikto"
     "subdominator" "subprober" "shodanx" "dorker" "spideyx" "dnsbruter"
+    "cloud_enum" "s3scanner" "gcpbucketbrute" "goblob" "ct-monitor"
     "skipfish"
 )
 
@@ -584,6 +626,9 @@ ReconX requires API keys for certain services. Please configure them:
 
    # SecurityTrails
    export SECURITYTRAILS_API_KEY="your_securitytrails_key"
+
+   # Chaos (ProjectDiscovery CT)
+   export CHAOS_KEY="your_chaos_key"
 
    # Pastebin
    export PASTEBIN_API_KEY="your_pastebin_key"
