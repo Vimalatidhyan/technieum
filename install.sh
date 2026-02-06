@@ -629,6 +629,7 @@ ReconX requires API keys for certain services. Please configure them:
 
    # Chaos (ProjectDiscovery CT)
    export CHAOS_KEY="your_chaos_key"
+   export PDCP_API_KEY="your_chaos_key"
 
    # Pastebin
    export PASTEBIN_API_KEY="your_pastebin_key"

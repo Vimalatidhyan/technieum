@@ -313,11 +313,12 @@ pids+=($!)
 
 # 6.1 Chaos (ProjectDiscovery CT)
 if command -v chaos &> /dev/null; then
-    if [ -n "$CHAOS_KEY" ]; then
+    CHAOS_API_KEY="${CHAOS_KEY:-${PDCP_API_KEY:-}}"
+    if [ -n "$CHAOS_API_KEY" ]; then
         log_info "Launching Chaos (CT)..."
         (
             if tool_supports_flag "chaos" "-key"; then
-                timeout "$CHAOS_TIMEOUT" chaos -d "$TARGET" -silent -key "$CHAOS_KEY" > "$CT_DIR/chaos.txt" 2>/dev/null || touch "$CT_DIR/chaos.txt"
+                timeout "$CHAOS_TIMEOUT" chaos -d "$TARGET" -silent -key "$CHAOS_API_KEY" > "$CT_DIR/chaos.txt" 2>/dev/null || touch "$CT_DIR/chaos.txt"
             else
                 timeout "$CHAOS_TIMEOUT" chaos -d "$TARGET" -silent > "$CT_DIR/chaos.txt" 2>/dev/null || touch "$CT_DIR/chaos.txt"
             fi
