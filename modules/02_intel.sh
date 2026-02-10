@@ -21,23 +21,9 @@ mkdir -p "$PHASE_DIR"
 echo "[*] Phase 2: Intelligence & Infrastructure for $TARGET"
 echo "[*] Output directory: $PHASE_DIR"
 
-# Color codes
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-log_info() {
-    echo -e "${GREEN}[+]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[-]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[!]${NC} $1"
-}
+# Shared utilities (log_info, log_error, log_warn, safe_cat, safe_grep, check_disk_space)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/common.sh"
 
 # Tunables (increase speed where safe)
 RUSTSCAN_BATCH="${RECONX_RUSTSCAN_BATCH:-1000}"
@@ -48,35 +34,6 @@ NMAP_HOST_TIMEOUT="${RECONX_NMAP_HOST_TIMEOUT:-600}"
 NMAP_MAX_FILE_MB="${RECONX_NMAP_MAX_FILE_MB:-500}"
 MIN_DISK_MB="${RECONX_MIN_DISK_MB:-1024}"
 
-safe_cat() {
-    local output_file="$1"
-    shift
-
-    > "$output_file"
-
-    for file in "$@"; do
-        if [ -f "$file" ] && [ -s "$file" ]; then
-            cat "$file" >> "$output_file" 2>/dev/null || true
-        fi
-    done
-
-    return 0
-}
-
-safe_grep() {
-    grep "$@" || true
-}
-
-check_disk_space() {
-    local dir="$1"
-    local avail_kb
-    avail_kb=$(df -k "$dir" 2>/dev/null | awk 'NR==2{print $4}')
-    if [ -n "$avail_kb" ] && [ "$avail_kb" -lt $((MIN_DISK_MB * 1024)) ]; then
-        log_error "Low disk space: $(( avail_kb / 1024 ))MB free (minimum: ${MIN_DISK_MB}MB). Stopping scan."
-        return 1
-    fi
-    return 0
-}
 
 run_shodanx_mode() {
     local mode="$1"
@@ -198,53 +155,40 @@ mkdir -p "$PORTS_DIR"
 # Extract just hostnames/IPs for port scanning
 cat "$SCAN_HOSTS" | sed -E 's|^https?://||' | sed 's|/.*||' | sed 's|:.*||' | sort -u > "$PORTS_DIR/targets_raw.txt"
 
-# Resolve hostnames to IPs to avoid rustscan resolution errors
-> "$PORTS_DIR/targets.txt"
-while IFS= read -r host; do
-    if [ -z "$host" ]; then
-        continue
-    fi
-
-    if echo "$host" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
-        echo "$host" >> "$PORTS_DIR/targets.txt"
-        continue
-    fi
-
-    resolved_ips=""
-    if command -v dig &> /dev/null; then
-        resolved_ips=$(dig +short "$host" | grep -E '^[0-9]+\.' | head -n 5)
-    fi
-
-    if [ -z "$resolved_ips" ] && command -v getent &> /dev/null; then
-        resolved_ips=$(getent ahostsv4 "$host" | awk '{print $1}' | sort -u | head -n 5)
-    fi
-
-    if [ -n "$resolved_ips" ]; then
-        echo "$resolved_ips" >> "$PORTS_DIR/targets.txt"
-    else
-        log_warn "Skipping unresolved host for port scan: $host"
-    fi
-done < "$PORTS_DIR/targets_raw.txt"
-
-sort -u "$PORTS_DIR/targets.txt" -o "$PORTS_DIR/targets.txt"
+# Resolve hostnames to IPs in bulk
+if command -v dnsx &> /dev/null; then
+    log_info "Resolving hostnames via dnsx..."
+    cat "$PORTS_DIR/targets_raw.txt" | dnsx -silent -a -resp-only > "$PORTS_DIR/resolved_ips.txt" 2>/dev/null || true
+    # Also keep original entries that are already IPs
+    grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' "$PORTS_DIR/targets_raw.txt" >> "$PORTS_DIR/resolved_ips.txt" 2>/dev/null || true
+    sort -u "$PORTS_DIR/resolved_ips.txt" -o "$PORTS_DIR/targets.txt"
+else
+    # Fallback: parallel dig with xargs
+    cat "$PORTS_DIR/targets_raw.txt" | xargs -P 20 -I{} sh -c '
+        host="{}"
+        if echo "$host" | grep -Eq "^([0-9]{1,3}\.){3}[0-9]{1,3}$"; then
+            echo "$host"
+        else
+            dig +short "$host" 2>/dev/null | grep -E "^[0-9]+\." | head -n 1
+        fi
+    ' > "$PORTS_DIR/targets.txt" 2>/dev/null
+    sort -u "$PORTS_DIR/targets.txt" -o "$PORTS_DIR/targets.txt"
+fi
 TARGETS_COUNT=$(wc -l < "$PORTS_DIR/targets.txt" 2>/dev/null | tr -d ' ')
 
-# RustScan - Fast initial scan
+# RustScan - Fast initial scan (all targets at once)
 if command -v rustscan &> /dev/null && [ "$TARGETS_COUNT" -gt 0 ]; then
-    log_info "Running RustScan (fast port discovery)..."
+    log_info "Running RustScan (fast port discovery on all targets)..."
     RUSTSCAN_NO_NMAP=""
 
     if rustscan -h 2>&1 | grep -q -- "--no-nmap"; then
         RUSTSCAN_NO_NMAP="--no-nmap"
     fi
 
-    # Scan hosts in batches
-    while IFS= read -r host; do
-        log_info "RustScan: $host"
-        rustscan -a "$host" -b "$RUSTSCAN_BATCH" -t "$RUSTSCAN_TIMEOUT" \
-            --ulimit 5000 --range 1-65535 $RUSTSCAN_NO_NMAP \
-            >> "$PORTS_DIR/rustscan_raw.txt" 2>/dev/null || log_warn "RustScan failed for $host"
-    done < "$PORTS_DIR/targets.txt"
+    TARGETS_CSV=$(paste -sd, "$PORTS_DIR/targets.txt")
+    rustscan -a "$TARGETS_CSV" -b "$RUSTSCAN_BATCH" -t "$RUSTSCAN_TIMEOUT" \
+        --ulimit 5000 --range 1-65535 $RUSTSCAN_NO_NMAP \
+        > "$PORTS_DIR/rustscan_raw.txt" 2>/dev/null || log_warn "RustScan failed"
 
     # Parse RustScan output to extract ports
     if [ -f "$PORTS_DIR/rustscan_raw.txt" ]; then
@@ -277,45 +221,20 @@ if command -v nmap &> /dev/null && [ "$TARGETS_COUNT" -gt 0 ]; then
     fi
 
     if [ -f "$NMAP_TARGETS" ]; then
-        NMAP_HOST_NUM=0
-        while IFS= read -r host; do
-            NMAP_HOST_NUM=$((NMAP_HOST_NUM + 1))
-
-            # Check disk space before each host
-            if ! check_disk_space "$PORTS_DIR"; then
-                log_error "Aborting Nmap due to low disk space"
-                break
-            fi
-
-            log_info "Nmap ($NMAP_HOST_NUM/$NMAP_TARGET_COUNT): $host"
-            timeout "${NMAP_HOST_TIMEOUT}s" \
-                nmap -sV -sC -T4 -Pn $NMAP_PORT_FLAG --host-timeout "${NMAP_HOST_TIMEOUT}s" "$host" \
-                -oX "$PORTS_DIR/nmap_host_${host//[^a-zA-Z0-9]/_}.xml" \
-                -oN "$PORTS_DIR/nmap_host_${host//[^a-zA-Z0-9]/_}.txt" \
-                2>/dev/null || log_warn "Nmap failed/timed out for $host"
-
-            # Check per-host XML size — abort if a single file exceeds limit
-            HOST_XML="$PORTS_DIR/nmap_host_${host//[^a-zA-Z0-9]/_}.xml"
-            if [ -f "$HOST_XML" ]; then
-                FILE_SIZE_MB=$(( $(stat -c%s "$HOST_XML" 2>/dev/null || stat -f%z "$HOST_XML" 2>/dev/null || echo 0) / 1048576 ))
-                if [ "$FILE_SIZE_MB" -gt "$NMAP_MAX_FILE_MB" ]; then
-                    log_error "Nmap XML for $host is ${FILE_SIZE_MB}MB (limit: ${NMAP_MAX_FILE_MB}MB) — removing and stopping"
-                    rm -f "$HOST_XML"
-                    break
-                fi
-            fi
-        done < "$NMAP_TARGETS"
-
-        # Merge per-host XMLs into nmap_all.xml (exclude nmap_all.xml itself)
-        echo '<?xml version="1.0" encoding="UTF-8"?>' > "$PORTS_DIR/nmap_all.xml"
-        echo '<nmaprun>' >> "$PORTS_DIR/nmap_all.xml"
-        for xml_file in "$PORTS_DIR"/nmap_host_*.xml; do
-            if [ -f "$xml_file" ] && [ -s "$xml_file" ]; then
-                sed -n '/<host /,/<\/host>/p' "$xml_file" >> "$PORTS_DIR/nmap_all.xml"
-                sed -n '/<host>/,/<\/host>/p' "$xml_file" >> "$PORTS_DIR/nmap_all.xml"
-            fi
-        done
-        echo '</nmaprun>' >> "$PORTS_DIR/nmap_all.xml"
+        # Check disk space before starting
+        if ! check_disk_space "$PORTS_DIR"; then
+            log_error "Aborting Nmap due to low disk space"
+        else
+            log_info "Nmap scanning $NMAP_TARGET_COUNT targets via -iL..."
+            timeout $((NMAP_HOST_TIMEOUT * NMAP_MAX_HOSTS)) \
+                nmap -sV -sC -T4 -Pn $NMAP_PORT_FLAG \
+                --host-timeout "${NMAP_HOST_TIMEOUT}s" \
+                --min-parallelism 10 \
+                -iL "$NMAP_TARGETS" \
+                -oX "$PORTS_DIR/nmap_all.xml" \
+                -oN "$PORTS_DIR/nmap_all.txt" \
+                2>/dev/null || log_warn "Nmap failed or timed out"
+        fi
     fi
 else
     log_warn "Nmap not found or no scan targets"

@@ -12,6 +12,9 @@ from tabulate import tabulate
 sys.path.insert(0, str(Path(__file__).parent))
 from db.database import DatabaseManager
 
+# Whitelist of allowed table names for export (prevents SQL injection)
+ALLOWED_TABLES = {'subdomains', 'vulnerabilities', 'leaks', 'ports', 'urls'}
+
 
 class ReconXQuery:
     """Database query interface"""
@@ -197,6 +200,10 @@ class ReconXQuery:
         """Export table to CSV"""
         import csv
 
+        if table not in ALLOWED_TABLES:
+            print(f"Error: Invalid table name '{table}'")
+            return
+
         rows = self.db.fetchall(f"SELECT * FROM {table} WHERE target = ?", (target,))
 
         if not rows:
@@ -230,7 +237,7 @@ def main():
                         help='Filter vulnerabilities by severity')
     parser.add_argument('--leaks', action='store_true', help='Show leaks')
     parser.add_argument('--ports', action='store_true', help='Show open ports')
-    parser.add_argument('--export', choices=['subdomains', 'vulnerabilities', 'leaks', 'ports', 'urls'],
+    parser.add_argument('--export', choices=sorted(ALLOWED_TABLES),
                         help='Export table to CSV')
     parser.add_argument('-o', '--output', help='Output file for export')
 
@@ -269,6 +276,8 @@ def main():
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
+    finally:
+        query.db.close()
 
 
 if __name__ == "__main__":

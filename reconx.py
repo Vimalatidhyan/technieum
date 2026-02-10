@@ -13,10 +13,19 @@ import sys
 import subprocess
 import json
 import time
+import threading
+import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Any
-from datetime import datetime
+from typing import List, Dict, Any, Optional
+
+# Load .env before anything else that reads env vars
+from dotenv import load_dotenv
+load_dotenv()
+
+import yaml
+from tqdm import tqdm
 
 # Add current directory to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -25,7 +34,7 @@ from db.database import DatabaseManager
 from parsers.parser import (
     SubdomainParser, HttpParser, DnsParser, PortParser,
     UrlParser, DirectoryParser, VulnerabilityParser,
-    LeakParser, TakeoverParser
+    LeakParser, TakeoverParser, URL_TOOL_PARSERS
 )
 
 
@@ -42,17 +51,52 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 
+class ColorFormatter(logging.Formatter):
+    """Logging formatter that adds ANSI color codes based on log level"""
+
+    LEVEL_COLORS = {
+        logging.DEBUG:    Colors.BLUE,
+        logging.INFO:     Colors.GREEN,
+        logging.WARNING:  Colors.YELLOW,
+        logging.ERROR:    Colors.RED,
+        logging.CRITICAL: Colors.RED + Colors.BOLD,
+    }
+    LEVEL_PREFIXES = {
+        logging.DEBUG:    '[~]',
+        logging.INFO:     '[+]',
+        logging.WARNING:  '[!]',
+        logging.ERROR:    '[-]',
+        logging.CRITICAL: '[!]',
+    }
+
+    def format(self, record):
+        color = self.LEVEL_COLORS.get(record.levelno, '')
+        prefix = self.LEVEL_PREFIXES.get(record.levelno, '[?]')
+        msg = super().format(record)
+        return f"{color}{prefix}{Colors.END} {msg}"
+
+
 class ReconX:
     """Main ReconX orchestrator"""
 
     def __init__(self, targets: List[str], output_dir: str = "output",
-                 db_path: str = "reconx.db", threads: int = 5):
+                 db_path: str = "reconx.db", threads: int = 5,
+                 test_mode: bool = False):
         self.targets = targets
         self.output_dir = Path(output_dir)
+        self.test_mode = test_mode
+
+        # Load config.yaml first, then allow env vars to override
+        self.config = self._load_config()
+        general = self.config.get('general', {})
+
+        self.threads = threads or general.get('threads', 5)
         self.db = DatabaseManager(db_path)
-        self.threads = threads
         self.modules_dir = Path(__file__).parent / "modules"
-        self.phase_timeout_default = int(os.getenv("RECONX_PHASE_TIMEOUT", "3600"))
+        self.phase_timeout_default = int(os.getenv(
+            "RECONX_PHASE_TIMEOUT",
+            str(general.get('timeout', 3600))
+        ))
         self.continue_on_fail = os.getenv("RECONX_CONTINUE_ON_FAIL", "1").lower() in ("1", "true", "yes")
         self.phase_timeouts = {
             1: int(os.getenv("RECONX_PHASE1_TIMEOUT", str(self.phase_timeout_default))),
@@ -64,6 +108,9 @@ class ReconX:
         # Initialize output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Set up logging
+        self.logger = self._setup_logging()
+
         # Initialize parsers
         self.subdomain_parser = SubdomainParser()
         self.http_parser = HttpParser()
@@ -74,6 +121,49 @@ class ReconX:
         self.vuln_parser = VulnerabilityParser()
         self.leak_parser = LeakParser()
         self.takeover_parser = TakeoverParser()
+
+    def _load_config(self, config_path: str = None) -> Dict[str, Any]:
+        """Load config.yaml, merge with env vars (env takes precedence)"""
+        if config_path is None:
+            config_path = Path(__file__).parent / "config.yaml"
+        config = {}
+        if Path(config_path).exists():
+            try:
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f) or {}
+            except Exception:
+                pass
+        return config
+
+    def _setup_logging(self) -> logging.Logger:
+        """Configure logging with file + console handlers"""
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+
+        logger = logging.getLogger('reconx')
+        logger.setLevel(logging.DEBUG)
+
+        # Avoid adding duplicate handlers on repeated instantiation
+        if logger.handlers:
+            return logger
+
+        # Console handler — INFO and above, colored
+        console = logging.StreamHandler()
+        console.setLevel(logging.INFO)
+        console.setFormatter(ColorFormatter('%(message)s'))
+        logger.addHandler(console)
+
+        # File handler — DEBUG and above, plain text
+        file_handler = RotatingFileHandler(
+            log_dir / 'reconx.log', maxBytes=10 * 1024 * 1024, backupCount=5
+        )
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        ))
+        logger.addHandler(file_handler)
+
+        return logger
 
     def banner(self):
         """Display ReconX banner"""
@@ -87,18 +177,6 @@ Attack Surface Management Framework
 {Colors.END}{Colors.CYAN}Version 1.0 | Comprehensive Reconnaissance Platform{Colors.END}
 """
         print(banner)
-
-    def log_info(self, message: str):
-        """Log info message"""
-        print(f"{Colors.GREEN}[+]{Colors.END} {message}")
-
-    def log_error(self, message: str):
-        """Log error message"""
-        print(f"{Colors.RED}[-]{Colors.END} {message}")
-
-    def log_warn(self, message: str):
-        """Log warning message"""
-        print(f"{Colors.YELLOW}[!]{Colors.END} {message}")
 
     def log_phase(self, phase: str):
         """Log phase header"""
@@ -116,49 +194,58 @@ Attack Surface Management Framework
         ]
         return all((phase_dir / filename).exists() for filename in required_files)
 
-    def run_module(self, module_script: str, target: str, output_dir: Path, timeout: int | None = None) -> bool:
-        """Execute a bash module script"""
+    def run_module(self, module_script: str, target: str, output_dir: Path,
+                   timeout: Optional[int] = None) -> bool:
+        """Execute a bash module script with real-time streaming output"""
         script_path = self.modules_dir / module_script
 
         if not script_path.exists():
-            self.log_error(f"Module {module_script} not found at {script_path}")
+            self.logger.error(f"Module {module_script} not found at {script_path}")
             return False
 
-        self.log_info(f"Executing {module_script} for {target}")
+        self.logger.info(f"Executing {module_script} for {target}")
 
         if timeout is None:
             timeout = self.phase_timeout_default
 
         try:
-            result = subprocess.run(
+            process = subprocess.Popen(
                 [str(script_path), target, str(output_dir)],
-                capture_output=True,
-                text=True,
-                timeout=timeout
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
 
-            # Print module output
-            if result.stdout:
-                print(result.stdout)
+            def drain_stderr(proc):
+                for line in proc.stderr:
+                    self.logger.warning(f"[{module_script}] {line.rstrip()}")
 
-            if result.returncode != 0:
-                self.log_error(f"Module {module_script} failed with code {result.returncode}")
-                if result.stderr:
-                    print(f"Error output:\n{result.stderr}")
+            stderr_thread = threading.Thread(target=drain_stderr, args=(process,), daemon=True)
+            stderr_thread.start()
+
+            for line in process.stdout:
+                print(line, end='')
+
+            process.wait(timeout=timeout)
+            stderr_thread.join(timeout=5)
+
+            if process.returncode != 0:
+                self.logger.error(f"Module {module_script} failed with code {process.returncode}")
                 return False
-
             return True
 
         except subprocess.TimeoutExpired:
-            self.log_error(f"Module {module_script} timed out")
+            process.kill()
+            process.wait()
+            self.logger.error(f"Module {module_script} timed out after {timeout}s")
             return False
         except Exception as e:
-            self.log_error(f"Error running {module_script}: {e}")
+            self.logger.error(f"Error running {module_script}: {e}")
             return False
 
     def parse_phase1_output(self, target: str, output_dir: Path):
         """Parse Phase 1 (Discovery) outputs into database"""
-        self.log_info(f"Parsing Phase 1 outputs for {target}")
+        self.logger.info(f"Parsing Phase 1 outputs for {target}")
 
         phase_dir = output_dir / "phase1_discovery"
 
@@ -179,7 +266,7 @@ Attack Surface Management Framework
         # Insert subdomains
         if all_subs:
             self.db.insert_subdomains_bulk(target, all_subs)
-            self.log_info(f"Inserted {len(all_subs)} subdomains")
+            self.logger.info(f"Inserted {len(all_subs)} subdomains")
 
         # Parse HTTPx results
         httpx_file = phase_dir / "httpx_alive.json"
@@ -187,7 +274,7 @@ Attack Surface Management Framework
             alive_hosts = self.http_parser.parse_httpx(str(httpx_file))
             if alive_hosts:
                 self.db.insert_subdomains_bulk(target, alive_hosts)
-                self.log_info(f"Updated {len(alive_hosts)} alive hosts")
+                self.logger.info(f"Updated {len(alive_hosts)} alive hosts")
         else:
             # Fallback to alive_hosts.txt when httpx output is missing
             alive_file = phase_dir / "alive_hosts.txt"
@@ -197,7 +284,7 @@ Attack Surface Management Framework
                     entry['is_alive'] = True
                 if alive_hosts:
                     self.db.insert_subdomains_bulk(target, alive_hosts)
-                    self.log_info(f"Updated {len(alive_hosts)} alive hosts (fallback)")
+                    self.logger.info(f"Updated {len(alive_hosts)} alive hosts (fallback)")
 
         # Parse DNSx results
         dnsx_file = phase_dir / "dnsx_resolved.json"
@@ -205,11 +292,11 @@ Attack Surface Management Framework
             resolved = self.dns_parser.parse_dnsx(str(dnsx_file))
             if resolved:
                 self.db.insert_subdomains_bulk(target, resolved)
-                self.log_info(f"Updated {len(resolved)} DNS records")
+                self.logger.info(f"Updated {len(resolved)} DNS records")
 
     def parse_phase2_output(self, target: str, output_dir: Path):
         """Parse Phase 2 (Intelligence) outputs into database"""
-        self.log_info(f"Parsing Phase 2 outputs for {target}")
+        self.logger.info(f"Parsing Phase 2 outputs for {target}")
 
         phase_dir = output_dir / "phase2_intel"
 
@@ -219,7 +306,7 @@ Attack Surface Management Framework
             ports = self.port_parser.parse_nmap_xml(str(nmap_file))
             if ports:
                 self.db.insert_ports_bulk(target, ports)
-                self.log_info(f"Inserted {len(ports)} port records")
+                self.logger.info(f"Inserted {len(ports)} port records")
 
         # Parse RustScan results
         rustscan_file = phase_dir / "ports" / "rustscan_ports.txt"
@@ -227,7 +314,7 @@ Attack Surface Management Framework
             ports = self.port_parser.parse_rustscan(str(rustscan_file))
             if ports:
                 self.db.insert_ports_bulk(target, ports)
-                self.log_info(f"Inserted {len(ports)} RustScan ports")
+                self.logger.info(f"Inserted {len(ports)} RustScan ports")
 
         # Parse Subjack (takeover) results
         subjack_file = phase_dir / "takeover" / "subjack_results.txt"
@@ -235,7 +322,7 @@ Attack Surface Management Framework
             takeovers = self.takeover_parser.parse_subjack(str(subjack_file))
             if takeovers:
                 self.db.insert_vulnerabilities_bulk(target, takeovers)
-                self.log_info(f"Found {len(takeovers)} potential subdomain takeovers")
+                self.logger.info(f"Found {len(takeovers)} potential subdomain takeovers")
 
         # Parse Gitleaks results
         gitleaks_files = list((phase_dir / "leaks").glob("gitleaks*.json"))
@@ -243,38 +330,33 @@ Attack Surface Management Framework
             leaks = self.leak_parser.parse_gitleaks(str(gitleaks_file))
             if leaks:
                 self.db.insert_leaks_bulk(target, leaks)
-                self.log_info(f"Found {len(leaks)} git leaks in {gitleaks_file.name}")
+                self.logger.info(f"Found {len(leaks)} git leaks in {gitleaks_file.name}")
 
     def parse_phase3_output(self, target: str, output_dir: Path):
         """Parse Phase 3 (Content) outputs into database"""
-        self.log_info(f"Parsing Phase 3 outputs for {target}")
+        self.logger.info(f"Parsing Phase 3 outputs for {target}")
 
         phase_dir = output_dir / "phase3_content"
-
-        # Parse URLs from various tools
-        url_tools = {
-            'gau.txt': 'gau',
-            'waybackurls.txt': 'waybackurls',
-            'hakrawler.txt': 'hakrawler',
-            'katana.txt': 'katana',
-            'spideyx.txt': 'spideyx',
-            'gospider.txt': 'gospider'
-        }
-
         urls_dir = phase_dir / "urls"
         all_urls = []
 
-        for filename, tool in url_tools.items():
+        # Use consolidated URL_TOOL_PARSERS mapping
+        for filename, tool in URL_TOOL_PARSERS.items():
             file_path = urls_dir / filename
             if file_path.exists():
-                parser_method = getattr(self.url_parser, f"parse_{tool}", None)
-                if parser_method:
-                    urls = parser_method(str(file_path))
+                # spideyx and gospider use regex extraction; others use plain list
+                if tool in ('spideyx', 'gospider'):
+                    parser_method = getattr(self.url_parser, f"parse_{tool}", None)
+                    if parser_method:
+                        urls = parser_method(str(file_path))
+                        all_urls.extend(urls)
+                else:
+                    urls = self.url_parser.parse_url_list(str(file_path), tool)
                     all_urls.extend(urls)
 
         if all_urls:
             self.db.insert_urls_bulk(target, all_urls)
-            self.log_info(f"Inserted {len(all_urls)} URLs")
+            self.logger.info(f"Inserted {len(all_urls)} URLs")
 
         # Parse directory brute-force results
         brute_dir = phase_dir / "bruteforce"
@@ -285,7 +367,7 @@ Attack Surface Management Framework
             paths = self.directory_parser.parse_ffuf(str(ffuf_file))
             if paths:
                 self.db.insert_urls_bulk(target, paths)
-                self.log_info(f"Inserted {len(paths)} paths from FFUF")
+                self.logger.info(f"Inserted {len(paths)} paths from FFUF")
 
         # Parse SecretFinder results
         js_dir = phase_dir / "javascript"
@@ -294,7 +376,7 @@ Attack Surface Management Framework
             secrets = self.leak_parser.parse_secretfinder(str(secretfinder_file))
             if secrets:
                 self.db.insert_leaks_bulk(target, secrets)
-                self.log_info(f"Found {len(secrets)} JS secrets")
+                self.logger.info(f"Found {len(secrets)} JS secrets")
 
         # Parse LinkFinder results
         linkfinder_file = js_dir / "linkfinder_endpoints.txt"
@@ -302,11 +384,11 @@ Attack Surface Management Framework
             endpoints = self.leak_parser.parse_linkfinder(str(linkfinder_file))
             if endpoints:
                 self.db.insert_leaks_bulk(target, endpoints)
-                self.log_info(f"Found {len(endpoints)} JS endpoints")
+                self.logger.info(f"Found {len(endpoints)} JS endpoints")
 
     def parse_phase4_output(self, target: str, output_dir: Path):
         """Parse Phase 4 (Vulnerability) outputs into database"""
-        self.log_info(f"Parsing Phase 4 outputs for {target}")
+        self.logger.info(f"Parsing Phase 4 outputs for {target}")
 
         phase_dir = output_dir / "phase4_vulnscan"
 
@@ -316,7 +398,7 @@ Attack Surface Management Framework
             vulns = self.vuln_parser.parse_nuclei(str(nuclei_file))
             if vulns:
                 self.db.insert_vulnerabilities_bulk(target, vulns)
-                self.log_info(f"Inserted {len(vulns)} Nuclei vulnerabilities")
+                self.logger.info(f"Inserted {len(vulns)} Nuclei vulnerabilities")
 
         # Parse Dalfox (XSS) results
         dalfox_file = phase_dir / "xss" / "dalfox_results.txt"
@@ -324,7 +406,7 @@ Attack Surface Management Framework
             vulns = self.vuln_parser.parse_dalfox(str(dalfox_file))
             if vulns:
                 self.db.insert_vulnerabilities_bulk(target, vulns)
-                self.log_info(f"Found {len(vulns)} XSS vulnerabilities")
+                self.logger.info(f"Found {len(vulns)} XSS vulnerabilities")
 
         # Parse SQLMap results
         sqlmap_file = phase_dir / "sqli" / "sqlmap_results.txt"
@@ -332,7 +414,7 @@ Attack Surface Management Framework
             vulns = self.vuln_parser.parse_sqlmap(str(sqlmap_file))
             if vulns:
                 self.db.insert_vulnerabilities_bulk(target, vulns)
-                self.log_info(f"Found {len(vulns)} SQL injection vulnerabilities")
+                self.logger.info(f"Found {len(vulns)} SQL injection vulnerabilities")
 
         # Parse Corsy (CORS) results
         corsy_file = phase_dir / "cors" / "corsy_results.txt"
@@ -340,10 +422,51 @@ Attack Surface Management Framework
             vulns = self.vuln_parser.parse_corsy(str(corsy_file))
             if vulns:
                 self.db.insert_vulnerabilities_bulk(target, vulns)
-                self.log_info(f"Found {len(vulns)} CORS misconfigurations")
+                self.logger.info(f"Found {len(vulns)} CORS misconfigurations")
 
-    def scan_target(self, target: str, phases: List[int]) -> bool:
+    def scan_target_test_mode(self, target: str, phases: List[int]) -> bool:
+        """Run scan with mock data for testing — no live network access"""
+        from tests.mock_data import MOCK_FILES
+
+        self.logger.info(f"[TEST MODE] Simulating scan for {target}")
+        target_dir = self.output_dir / target.replace('.', '_')
+
+        # Write mock output files to disk so parsers can read them normally
+        for phase_dir_name, files in MOCK_FILES.items():
+            phase_dir = target_dir / phase_dir_name
+            for file_path_str, content in files.items():
+                full_path = phase_dir / file_path_str
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+                full_path.write_text(content)
+
+        # Initialize target in database
+        self.db.init_target(target)
+
+        # Run parsers against mock files (same code path as production)
+        if 1 in phases:
+            self.parse_phase1_output(target, target_dir)
+            self.db.update_phase(target, 1, True)
+        if 2 in phases:
+            self.parse_phase2_output(target, target_dir)
+            self.db.update_phase(target, 2, True)
+        if 3 in phases:
+            self.parse_phase3_output(target, target_dir)
+            self.db.update_phase(target, 3, True)
+        if 4 in phases:
+            self.parse_phase4_output(target, target_dir)
+            self.db.update_phase(target, 4, True)
+
+        self.logger.info(f"[TEST MODE] Scan complete for {target}")
+        return True
+
+    def scan_target(self, target: str, phases: List[int] = None) -> bool:
         """Perform reconnaissance on a single target"""
+        if phases is None:
+            phases = [1, 2, 3, 4]
+
+        if self.test_mode:
+            return self.scan_target_test_mode(target, phases)
+
         self.log_phase(f"Starting scan for {target}")
 
         # Create target-specific output directory
@@ -355,78 +478,85 @@ Attack Surface Management Framework
 
         success = True
 
+        phase_names = {1: "Discovery", 2: "Intelligence", 3: "Content", 4: "Vulnerability"}
+        active_phases = [p for p in phases if p in phase_names]
+
         try:
-            # Phase 1: Discovery
-            if 1 in phases:
-                progress = self.db.get_progress(target)
-                if progress and progress['phase1_done'] and not self.phase1_outputs_ok(target_dir):
-                    self.log_warn("Phase 1 marked complete but outputs missing; rerunning...")
-                    self.db.update_phase(target, 1, False)
-                    progress = None
+            with tqdm(active_phases, desc=f"Scanning {target}", unit="phase") as pbar:
+                for phase_num in pbar:
+                    pbar.set_postfix_str(phase_names[phase_num])
 
-                if progress and progress['phase1_done']:
-                    self.log_warn("Phase 1 already completed, skipping...")
-                else:
-                    self.log_phase(f"Phase 1: Discovery & Enumeration - {target}")
-                    if self.run_module("01_discovery.sh", target, target_dir, timeout=self.phase_timeouts[1]):
-                        self.parse_phase1_output(target, target_dir)
-                        self.db.update_phase(target, 1, True)
-                    else:
-                        self.log_error("Phase 1 failed")
-                        success = False
-                        if self.continue_on_fail:
-                            self.log_warn("Continuing to next phases despite Phase 1 failure")
+                    # Phase 1: Discovery
+                    if phase_num == 1:
+                        progress = self.db.get_progress(target)
+                        if progress and progress['phase1_done'] and not self.phase1_outputs_ok(target_dir):
+                            self.logger.warning("Phase 1 marked complete but outputs missing; rerunning...")
+                            self.db.update_phase(target, 1, False)
+                            progress = None
 
-            # Phase 2: Intelligence
-            if 2 in phases and (success or self.continue_on_fail):
-                progress = self.db.get_progress(target)
-                if progress and progress['phase2_done']:
-                    self.log_warn("Phase 2 already completed, skipping...")
-                else:
-                    self.log_phase(f"Phase 2: Intelligence & Infrastructure - {target}")
-                    if self.run_module("02_intel.sh", target, target_dir, timeout=self.phase_timeouts[2]):
-                        self.parse_phase2_output(target, target_dir)
-                        self.db.update_phase(target, 2, True)
-                    else:
-                        self.log_error("Phase 2 failed")
-                        success = False
-                        if self.continue_on_fail:
-                            self.log_warn("Continuing to next phases despite Phase 2 failure")
+                        if progress and progress['phase1_done']:
+                            self.logger.warning("Phase 1 already completed, skipping...")
+                        else:
+                            self.log_phase(f"Phase 1: Discovery & Enumeration - {target}")
+                            if self.run_module("01_discovery.sh", target, target_dir, timeout=self.phase_timeouts[1]):
+                                self.parse_phase1_output(target, target_dir)
+                                self.db.update_phase(target, 1, True)
+                            else:
+                                self.logger.error("Phase 1 failed")
+                                success = False
+                                if self.continue_on_fail:
+                                    self.logger.warning("Continuing to next phases despite Phase 1 failure")
 
-            # Phase 3: Content Discovery
-            if 3 in phases and (success or self.continue_on_fail):
-                progress = self.db.get_progress(target)
-                if progress and progress['phase3_done']:
-                    self.log_warn("Phase 3 already completed, skipping...")
-                else:
-                    self.log_phase(f"Phase 3: Deep Web & Content Discovery - {target}")
-                    if self.run_module("03_content.sh", target, target_dir, timeout=self.phase_timeouts[3]):
-                        self.parse_phase3_output(target, target_dir)
-                        self.db.update_phase(target, 3, True)
-                    else:
-                        self.log_error("Phase 3 failed")
-                        success = False
-                        if self.continue_on_fail:
-                            self.log_warn("Continuing to next phases despite Phase 3 failure")
+                    # Phase 2: Intelligence
+                    elif phase_num == 2 and (success or self.continue_on_fail):
+                        progress = self.db.get_progress(target)
+                        if progress and progress['phase2_done']:
+                            self.logger.warning("Phase 2 already completed, skipping...")
+                        else:
+                            self.log_phase(f"Phase 2: Intelligence & Infrastructure - {target}")
+                            if self.run_module("02_intel.sh", target, target_dir, timeout=self.phase_timeouts[2]):
+                                self.parse_phase2_output(target, target_dir)
+                                self.db.update_phase(target, 2, True)
+                            else:
+                                self.logger.error("Phase 2 failed")
+                                success = False
+                                if self.continue_on_fail:
+                                    self.logger.warning("Continuing to next phases despite Phase 2 failure")
 
-            # Phase 4: Vulnerability Scanning
-            if 4 in phases and (success or self.continue_on_fail):
-                progress = self.db.get_progress(target)
-                if progress and progress['phase4_done']:
-                    self.log_warn("Phase 4 already completed, skipping...")
-                else:
-                    self.log_phase(f"Phase 4: Vulnerability Scanning - {target}")
-                    if self.run_module("04_vuln.sh", target, target_dir, timeout=self.phase_timeouts[4]):
-                        self.parse_phase4_output(target, target_dir)
-                        self.db.update_phase(target, 4, True)
-                    else:
-                        self.log_error("Phase 4 failed")
-                        success = False
-                        if self.continue_on_fail:
-                            self.log_warn("Continuing after Phase 4 failure")
+                    # Phase 3: Content Discovery
+                    elif phase_num == 3 and (success or self.continue_on_fail):
+                        progress = self.db.get_progress(target)
+                        if progress and progress['phase3_done']:
+                            self.logger.warning("Phase 3 already completed, skipping...")
+                        else:
+                            self.log_phase(f"Phase 3: Deep Web & Content Discovery - {target}")
+                            if self.run_module("03_content.sh", target, target_dir, timeout=self.phase_timeouts[3]):
+                                self.parse_phase3_output(target, target_dir)
+                                self.db.update_phase(target, 3, True)
+                            else:
+                                self.logger.error("Phase 3 failed")
+                                success = False
+                                if self.continue_on_fail:
+                                    self.logger.warning("Continuing to next phases despite Phase 3 failure")
+
+                    # Phase 4: Vulnerability Scanning
+                    elif phase_num == 4 and (success or self.continue_on_fail):
+                        progress = self.db.get_progress(target)
+                        if progress and progress['phase4_done']:
+                            self.logger.warning("Phase 4 already completed, skipping...")
+                        else:
+                            self.log_phase(f"Phase 4: Vulnerability Scanning - {target}")
+                            if self.run_module("04_vuln.sh", target, target_dir, timeout=self.phase_timeouts[4]):
+                                self.parse_phase4_output(target, target_dir)
+                                self.db.update_phase(target, 4, True)
+                            else:
+                                self.logger.error("Phase 4 failed")
+                                success = False
+                                if self.continue_on_fail:
+                                    self.logger.warning("Continuing after Phase 4 failure")
 
         except Exception as e:
-            self.log_error(f"Error scanning {target}: {e}")
+            self.logger.error(f"Error scanning {target}: {e}")
             success = False
 
         return success
@@ -453,16 +583,19 @@ Attack Surface Management Framework
 
         print()
 
-    def run(self, phases: List[int] = [1, 2, 3, 4]):
+    def run(self, phases: List[int] = None):
         """Main execution method"""
+        if phases is None:
+            phases = [1, 2, 3, 4]
+
         start_time = time.time()
 
         self.banner()
-        self.log_info(f"Starting ReconX for {len(self.targets)} target(s)")
-        self.log_info(f"Output directory: {self.output_dir}")
-        self.log_info(f"Database: {self.db.db_path}")
-        self.log_info(f"Phases: {phases}")
-        self.log_info(f"Thread pool size: {self.threads}")
+        self.logger.info(f"Starting ReconX for {len(self.targets)} target(s)")
+        self.logger.info(f"Output directory: {self.output_dir}")
+        self.logger.info(f"Database: {self.db.db_path}")
+        self.logger.info(f"Phases: {phases}")
+        self.logger.info(f"Thread pool size: {self.threads}")
 
         # Scan targets
         if len(self.targets) == 1:
@@ -486,14 +619,14 @@ Attack Surface Management Framework
                         if success:
                             self.print_statistics(target)
                     except Exception as e:
-                        self.log_error(f"Target {target} generated exception: {e}")
+                        self.logger.error(f"Target {target} generated exception: {e}")
 
         # Final summary
         elapsed = time.time() - start_time
         self.log_phase("Scan Complete")
-        self.log_info(f"Total time: {elapsed:.2f} seconds ({elapsed/60:.2f} minutes)")
-        self.log_info(f"Results saved to: {self.output_dir}")
-        self.log_info(f"Database: {self.db.db_path}")
+        self.logger.info(f"Total time: {elapsed:.2f} seconds ({elapsed/60:.2f} minutes)")
+        self.logger.info(f"Results saved to: {self.output_dir}")
+        self.logger.info(f"Database: {self.db.db_path}")
 
         # Print final statistics for all targets
         print(f"\n{Colors.BOLD}{Colors.GREEN}Final Statistics:{Colors.END}\n")
@@ -522,6 +655,9 @@ Examples:
   # Custom output and threads
   %(prog)s -t example.com -o results -T 10
 
+  # Test mode (no live scanning)
+  %(prog)s -t example.com --test
+
 Phases:
   1 - Discovery & Enumeration
   2 - Intelligence & Infrastructure
@@ -537,6 +673,7 @@ Phases:
     parser.add_argument('-p', '--phases', default='1,2,3,4', help='Phases to run (default: 1,2,3,4)')
     parser.add_argument('-T', '--threads', type=int, default=5, help='Number of concurrent target scans (default: 5)')
     parser.add_argument('--resume', action='store_true', help='Resume incomplete scans')
+    parser.add_argument('--test', action='store_true', help='Run in test mode with mock data (no live scanning)')
 
     args = parser.parse_args()
 
@@ -567,7 +704,8 @@ Phases:
         targets=targets,
         output_dir=args.output,
         db_path=args.database,
-        threads=args.threads
+        threads=args.threads,
+        test_mode=args.test
     )
 
     try:
@@ -580,6 +718,8 @@ Phases:
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        reconx.db.close()
 
 
 if __name__ == "__main__":

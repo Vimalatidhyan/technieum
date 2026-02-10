@@ -1,25 +1,17 @@
 # ReconX Python Requirements
 # Install with: pip3 install -r requirements.txt
 
-# Core dependencies
-requests>=2.31.0
-beautifulsoup4>=4.12.0
-dnspython>=2.4.0
+# Config and environment
 pyyaml>=6.0.0
+python-dotenv>=1.0.0
 
 # CLI and formatting
 colorama>=0.4.6
 tqdm>=4.66.0
+tabulate>=0.9.0
 
-# Async support
-aiohttp>=3.9.0
-
-# XML/HTML parsing
+# XML/HTML parsing (used by parsers/parser.py for nmap XML)
 lxml>=4.9.3
 
 # Database
 # SQLite3 is built into Python
-
-# Optional: Enhanced features
-python-dotenv>=1.0.0
-tabulate>=0.9.0

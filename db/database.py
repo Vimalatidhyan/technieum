@@ -2,7 +2,6 @@
 """
 ReconX Database Manager
 SQLite3 with WAL Mode for concurrent access
-Singleton pattern for thread-safe database operations
 """
 
 import sqlite3
@@ -14,26 +13,11 @@ from datetime import datetime
 
 
 class DatabaseManager:
-    """Singleton Database Manager with WAL mode enabled"""
-
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls, db_path: str = "reconx.db"):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
+    """Database Manager with WAL mode enabled"""
 
     def __init__(self, db_path: str = "reconx.db"):
-        if self._initialized:
-            return
-
         self.db_path = db_path
         self.local = threading.local()
-        self._initialized = True
         self._init_database()
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -215,13 +199,18 @@ class DatabaseManager:
         return cursor
 
     def executemany(self, query: str, params_list: List[tuple]) -> None:
-        """Execute many queries at once"""
+        """Execute many queries in a single transaction"""
         if not params_list:
             return
         conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.executemany(query, params_list)
-        conn.commit()
+        conn.execute("BEGIN")
+        try:
+            cursor = conn.cursor()
+            cursor.executemany(query, params_list)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def fetchone(self, query: str, params: tuple = ()) -> Optional[sqlite3.Row]:
         """Execute query and fetch one result"""
@@ -370,16 +359,30 @@ class DatabaseManager:
         """, (target, host, ip, int(is_alive), status_code, source_tool))
 
     def insert_subdomains_bulk(self, target: str, subdomains: List[Dict[str, Any]]) -> None:
-        """Bulk insert subdomains"""
-        data = [
-            (target, sub['host'], sub.get('ip'), int(sub.get('is_alive', False)),
-             sub.get('status_code'), sub.get('source_tool'))
-            for sub in subdomains
-        ]
-        self.executemany("""
-            INSERT OR IGNORE INTO subdomains (target, host, ip, is_alive, status_code, source_tools)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, data)
+        """Bulk insert/update subdomains using ON CONFLICT DO UPDATE to preserve data"""
+        conn = self._get_connection()
+        conn.execute("BEGIN")
+        try:
+            for sub in subdomains:
+                conn.execute("""
+                    INSERT INTO subdomains (target, host, ip, is_alive, status_code, source_tools)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(target, host) DO UPDATE SET
+                        ip = COALESCE(excluded.ip, ip),
+                        is_alive = excluded.is_alive OR is_alive,
+                        status_code = COALESCE(excluded.status_code, status_code),
+                        source_tools = CASE
+                            WHEN source_tools IS NULL THEN excluded.source_tools
+                            WHEN excluded.source_tools IS NULL THEN source_tools
+                            WHEN source_tools LIKE '%' || excluded.source_tools || '%' THEN source_tools
+                            ELSE source_tools || ',' || excluded.source_tools
+                        END
+                """, (target, sub['host'], sub.get('ip'), int(sub.get('is_alive', False)),
+                      sub.get('status_code'), sub.get('source_tool')))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def get_alive_hosts(self, target: str) -> List[str]:
         """Get all alive hosts for target"""
@@ -502,42 +505,22 @@ class DatabaseManager:
     # ==================== STATISTICS ====================
 
     def get_stats(self, target: str) -> Dict[str, int]:
-        """Get statistics for target"""
-        stats = {}
-
-        stats['subdomains'] = self.fetchone(
-            "SELECT COUNT(*) as count FROM subdomains WHERE target = ?", (target,)
-        )['count']
-
-        stats['alive_hosts'] = self.fetchone(
-            "SELECT COUNT(*) as count FROM subdomains WHERE target = ? AND is_alive = 1", (target,)
-        )['count']
-
-        stats['urls'] = self.fetchone(
-            "SELECT COUNT(*) as count FROM urls WHERE target = ?", (target,)
-        )['count']
-
-        stats['vulnerabilities'] = self.fetchone(
-            "SELECT COUNT(*) as count FROM vulnerabilities WHERE target = ?", (target,)
-        )['count']
-
-        stats['critical_vulns'] = self.fetchone(
-            "SELECT COUNT(*) as count FROM vulnerabilities WHERE target = ? AND severity = 'critical'", (target,)
-        )['count']
-
-        stats['high_vulns'] = self.fetchone(
-            "SELECT COUNT(*) as count FROM vulnerabilities WHERE target = ? AND severity = 'high'", (target,)
-        )['count']
-
-        stats['leaks'] = self.fetchone(
-            "SELECT COUNT(*) as count FROM leaks WHERE target = ?", (target,)
-        )['count']
-
-        stats['open_ports'] = self.fetchone(
-            "SELECT COUNT(*) as count FROM ports WHERE target = ?", (target,)
-        )['count']
-
-        return stats
+        """Get statistics for target in a single query"""
+        row = self.fetchone("""
+            SELECT
+                (SELECT COUNT(*) FROM subdomains WHERE target = ?) as subdomains,
+                (SELECT COUNT(*) FROM subdomains WHERE target = ? AND is_alive = 1) as alive_hosts,
+                (SELECT COUNT(*) FROM urls WHERE target = ?) as urls,
+                (SELECT COUNT(*) FROM vulnerabilities WHERE target = ?) as vulnerabilities,
+                (SELECT COUNT(*) FROM vulnerabilities WHERE target = ? AND severity = 'critical') as critical_vulns,
+                (SELECT COUNT(*) FROM vulnerabilities WHERE target = ? AND severity = 'high') as high_vulns,
+                (SELECT COUNT(*) FROM leaks WHERE target = ?) as leaks,
+                (SELECT COUNT(*) FROM ports WHERE target = ?) as open_ports
+        """, (target, target, target, target, target, target, target, target))
+        return dict(row) if row else {
+            'subdomains': 0, 'alive_hosts': 0, 'urls': 0, 'vulnerabilities': 0,
+            'critical_vulns': 0, 'high_vulns': 0, 'leaks': 0, 'open_ports': 0
+        }
 
     def close(self):
         """Close database connection"""

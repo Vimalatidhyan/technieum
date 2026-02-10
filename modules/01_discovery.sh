@@ -57,30 +57,17 @@ CLOUD_KEYWORDS_LIMIT="${RECONX_CLOUD_KEYWORDS_LIMIT:-400}"
 echo "[*] Phase 1: Discovery & Enumeration for $TARGET"
 echo "[*] Output directory: $PHASE_DIR"
 
-# Color codes
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+# Shared utilities (log_info, log_error, log_warn, safe_cat, safe_grep, check_disk_space)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/common.sh"
 
 # Tool execution tracking
 TOOLS_SUCCESS=0
 TOOLS_FAILED=0
 TOOLS_SKIPPED=0
 
-log_info() {
-    echo -e "${GREEN}[+]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[-]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[!]${NC} $1"
-}
-
 # Enhanced run_tool function with timeout and proper error handling
+# (overrides the simple run_tool from lib/common.sh with a richer version)
 run_tool() {
     local tool_name="$1"
     local output_file="$2"
@@ -118,27 +105,6 @@ run_tool() {
         ((TOOLS_FAILED++))
         return 1
     fi
-}
-
-# Safe cat/merge function that doesn't fail on empty files
-safe_cat() {
-    local output_file="$1"
-    shift
-
-    > "$output_file"  # Create empty file
-
-    for file in "$@"; do
-        if [ -f "$file" ] && [ -s "$file" ]; then
-            cat "$file" >> "$output_file" 2>/dev/null || true
-        fi
-    done
-
-    return 0
-}
-
-# Safe grep that doesn't fail on no matches
-safe_grep() {
-    grep "$@" || true
 }
 
 # Check if a tool supports a specific flag
@@ -369,7 +335,7 @@ for pid in "${pids[@]}"; do
     if wait "$pid"; then
         ((TOOLS_SUCCESS++))
     else
-        local exit_code=$?
+        exit_code=$?
         if [ $exit_code -ne 0 ]; then
             ((TOOLS_FAILED++))
         fi

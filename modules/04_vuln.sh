@@ -22,52 +22,15 @@ mkdir -p "$PHASE_DIR"
 echo "[*] Phase 4: Vulnerability Scanning for $TARGET"
 echo "[*] Output directory: $PHASE_DIR"
 
-# Color codes
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-log_info() {
-    echo -e "${GREEN}[+]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[-]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[!]${NC} $1"
-}
-
-safe_cat() {
-    local output_file="$1"
-    shift
-
-    > "$output_file"
-
-    for file in "$@"; do
-        if [ -f "$file" ] && [ -s "$file" ]; then
-            cat "$file" >> "$output_file" 2>/dev/null || true
-        fi
-    done
-
-    return 0
-}
-
-safe_grep() {
-    grep "$@" || true
-}
+# Shared utilities (log_info, log_error, log_warn, safe_cat, safe_grep, check_disk_space)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/common.sh"
 
 # Concurrency controls
 THREADS="${RECONX_THREADS:-10}"
 SQLMAP_THREADS="${RECONX_SQLMAP_THREADS:-5}"
 TIMEOUT_DEFAULT="${RECONX_VULN_TIMEOUT:-3600}"
 NUCLEI_RATE_HIGH="${RECONX_NUCLEI_RATE_HIGH:-100}"
-NUCLEI_RATE_MED="${RECONX_NUCLEI_RATE_MED:-150}"
-NUCLEI_RATE_LOW="${RECONX_NUCLEI_RATE_LOW:-200}"
-NUCLEI_RATE_CVE="${RECONX_NUCLEI_RATE_CVE:-100}"
-NUCLEI_RATE_MISC="${RECONX_NUCLEI_RATE_MISC:-150}"
 
 # Sanitize concurrency values
 if ! [[ "$THREADS" =~ ^[0-9]+$ ]] || [ "$THREADS" -lt 1 ]; then
@@ -138,37 +101,18 @@ if command -v nuclei &> /dev/null && [ "$SCAN_COUNT" -gt 0 ]; then
     log_info "Updating Nuclei templates..."
     run_with_timeout "$TIMEOUT_DEFAULT" "nuclei -update-templates" || log_warn "Failed to update Nuclei templates"
 
-    # Run Nuclei with different severity levels
-    log_info "Nuclei: Critical & High severity scan..."
+    # Single consolidated Nuclei run covering all severities and CVE/misconfiguration tags.
+    # One pass is faster than five sequential passes over the same URL list because Nuclei
+    # deduplicates template execution internally and avoids re-establishing connections.
+    log_info "Nuclei: full scan (critical,high,medium,low,info + cve + misconfiguration)..."
     cat "$PHASE_DIR/scan_urls.txt" | \
-        nuclei -silent -json -severity critical,high -rate-limit "$NUCLEI_RATE_HIGH" \
-        -o "$NUCLEI_DIR/nuclei_critical_high.json" 2>/dev/null || log_warn "Nuclei critical/high scan failed"
+        nuclei -silent -json \
+        -severity critical,high,medium,low,info \
+        -tags cve,misconfiguration,config \
+        -rate-limit "$NUCLEI_RATE_HIGH" \
+        -o "$NUCLEI_DIR/nuclei_all.json" 2>/dev/null || log_warn "Nuclei scan failed"
 
-    log_info "Nuclei: Medium severity scan..."
-    cat "$PHASE_DIR/scan_urls.txt" | \
-        nuclei -silent -json -severity medium -rate-limit "$NUCLEI_RATE_MED" \
-        -o "$NUCLEI_DIR/nuclei_medium.json" 2>/dev/null || log_warn "Nuclei medium scan failed"
-
-    log_info "Nuclei: Low & Info severity scan..."
-    cat "$PHASE_DIR/scan_urls.txt" | \
-        nuclei -silent -json -severity low,info -rate-limit "$NUCLEI_RATE_LOW" \
-        -o "$NUCLEI_DIR/nuclei_low_info.json" 2>/dev/null || log_warn "Nuclei low/info scan failed"
-
-    # Specific template scans
-    log_info "Nuclei: CVE templates..."
-    cat "$PHASE_DIR/scan_urls.txt" | \
-        nuclei -silent -json -tags cve -rate-limit "$NUCLEI_RATE_CVE" \
-        -o "$NUCLEI_DIR/nuclei_cve.json" 2>/dev/null || log_warn "Nuclei CVE scan failed"
-
-    log_info "Nuclei: Misconfiguration templates..."
-    cat "$PHASE_DIR/scan_urls.txt" | \
-        nuclei -silent -json -tags misconfiguration,config -rate-limit "$NUCLEI_RATE_MISC" \
-        -o "$NUCLEI_DIR/nuclei_misconfig.json" 2>/dev/null || log_warn "Nuclei misconfig scan failed"
-
-    # Merge all Nuclei results
-    safe_cat "$NUCLEI_DIR/nuclei_all.json" "$NUCLEI_DIR"/nuclei_*.json
-
-    NUCLEI_COUNT=$(cat "$NUCLEI_DIR/nuclei_all.json" | jq -s 'length' 2>/dev/null || echo "0")
+    NUCLEI_COUNT=$(jq -s 'length' "$NUCLEI_DIR/nuclei_all.json" 2>/dev/null || echo "0")
     log_info "Nuclei findings: $NUCLEI_COUNT"
 else
     log_warn "Nuclei not found or no scan URLs"

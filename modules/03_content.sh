@@ -31,42 +31,9 @@ DIRSEARCH_THREADS="${RECONX_DIRSEARCH_THREADS:-80}"
 echo "[*] Phase 3: Deep Web & Content Discovery for $TARGET"
 echo "[*] Output directory: $PHASE_DIR"
 
-# Color codes
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-log_info() {
-    echo -e "${GREEN}[+]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[-]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[!]${NC} $1"
-}
-
-safe_cat() {
-    local output_file="$1"
-    shift
-
-    > "$output_file"
-
-    for file in "$@"; do
-        if [ -f "$file" ] && [ -s "$file" ]; then
-            cat "$file" >> "$output_file" 2>/dev/null || true
-        fi
-    done
-
-    return 0
-}
-
-safe_grep() {
-    grep "$@" || true
-}
+# Shared utilities (log_info, log_error, log_warn, safe_cat, safe_grep, check_disk_space)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/common.sh"
 
 # Check if alive hosts exist from Phase 1
 if [ ! -f "$PHASE1_DIR/alive_hosts.txt" ]; then
@@ -279,19 +246,23 @@ head -n 20 "$ALIVE_HOSTS" > "$BRUTE_DIR/brute_targets.txt"
 BRUTE_COUNT=$(wc -l < "$BRUTE_DIR/brute_targets.txt" | tr -d ' ')
 log_info "Brute-forcing $BRUTE_COUNT hosts..."
 
-# 1. FFUF (Fast)
+# 1. FFUF (Fast) — run all hosts in parallel (up to 5 at once)
 if command -v ffuf &> /dev/null; then
-    log_info "Running FFUF..."
+    log_info "Running FFUF (parallel, up to 5 hosts)..."
 
-    while IFS= read -r host; do
-        url="https://$host/FUZZ"
-        log_info "FFUF: $host"
-
-        ffuf -u "$url" -w "$WORDLIST" \
-            -mc 200,201,202,203,204,301,302,307,308,401,403 \
-            -t "$FFUF_THREADS" -timeout "$FFUF_TIMEOUT" -s -json \
-            -o "$BRUTE_DIR/ffuf_${host//[^a-zA-Z0-9]/_}.json" 2>/dev/null || log_warn "FFUF failed for $host"
-    done < "$BRUTE_DIR/brute_targets.txt"
+    export BRUTE_DIR WORDLIST FFUF_THREADS FFUF_TIMEOUT
+    tr '\n' '\0' < "$BRUTE_DIR/brute_targets.txt" | \
+        xargs -0 -P 5 -I{} bash -c '
+            host="{}"
+            log_info() { echo -e "\033[0;32m[+]\033[0m $1"; }
+            log_warn() { echo -e "\033[1;33m[!]\033[0m $1"; }
+            log_info "FFUF: $host"
+            ffuf -u "https://$host/FUZZ" -w "$WORDLIST" \
+                -mc 200,201,202,203,204,301,302,307,308,401,403 \
+                -t "$FFUF_THREADS" -timeout "$FFUF_TIMEOUT" -s -json \
+                -o "$BRUTE_DIR/ffuf_${host//[^a-zA-Z0-9]/_}.json" 2>/dev/null || \
+                log_warn "FFUF failed for $host"
+        '
 
     # Merge FFUF results
     cat "$BRUTE_DIR"/ffuf_*.json 2>/dev/null > "$BRUTE_DIR/ffuf_all.json" || touch "$BRUTE_DIR/ffuf_all.json"
@@ -299,18 +270,22 @@ else
     log_warn "FFUF not found"
 fi
 
-# 2. Feroxbuster (Recursive)
+# 2. Feroxbuster (Recursive) — run all hosts in parallel (up to 5 at once)
 if command -v feroxbuster &> /dev/null; then
-    log_info "Running Feroxbuster (recursive)..."
+    log_info "Running Feroxbuster (parallel, up to 5 hosts)..."
 
-    while IFS= read -r host; do
-        url="https://$host"
-        log_info "Feroxbuster: $host"
-
-        feroxbuster -u "$url" -w "$WORDLIST" \
-            -t "$FEROX_THREADS" -d 2 --auto-bail --random-agent \
-            -o "$BRUTE_DIR/feroxbuster_${host//[^a-zA-Z0-9]/_}.txt" 2>/dev/null || log_warn "Feroxbuster failed for $host"
-    done < "$BRUTE_DIR/brute_targets.txt"
+    export BRUTE_DIR WORDLIST FEROX_THREADS
+    tr '\n' '\0' < "$BRUTE_DIR/brute_targets.txt" | \
+        xargs -0 -P 5 -I{} bash -c '
+            host="{}"
+            log_info() { echo -e "\033[0;32m[+]\033[0m $1"; }
+            log_warn() { echo -e "\033[1;33m[!]\033[0m $1"; }
+            log_info "Feroxbuster: $host"
+            feroxbuster -u "https://$host" -w "$WORDLIST" \
+                -t "$FEROX_THREADS" -d 2 --auto-bail --random-agent \
+                -o "$BRUTE_DIR/feroxbuster_${host//[^a-zA-Z0-9]/_}.txt" 2>/dev/null || \
+                log_warn "Feroxbuster failed for $host"
+        '
 
     # Merge results
     cat "$BRUTE_DIR"/feroxbuster_*.txt 2>/dev/null > "$BRUTE_DIR/feroxbuster_all.txt" || touch "$BRUTE_DIR/feroxbuster_all.txt"
@@ -318,18 +293,22 @@ else
     log_warn "Feroxbuster not found"
 fi
 
-# 3. Dirsearch (Classic)
+# 3. Dirsearch (Classic) — run all hosts in parallel (up to 5 at once)
 if command -v dirsearch &> /dev/null; then
-    log_info "Running Dirsearch..."
+    log_info "Running Dirsearch (parallel, up to 5 hosts)..."
 
-    while IFS= read -r host; do
-        url="https://$host"
-        log_info "Dirsearch: $host"
-
-        dirsearch -u "$url" -w "$WORDLIST" \
-            -t "$DIRSEARCH_THREADS" --random-agent --exclude-status 404,400,500,502,503 \
-            -o "$BRUTE_DIR/dirsearch_${host//[^a-zA-Z0-9]/_}.txt" 2>/dev/null || log_warn "Dirsearch failed for $host"
-    done < "$BRUTE_DIR/brute_targets.txt"
+    export BRUTE_DIR WORDLIST DIRSEARCH_THREADS
+    tr '\n' '\0' < "$BRUTE_DIR/brute_targets.txt" | \
+        xargs -0 -P 5 -I{} bash -c '
+            host="{}"
+            log_info() { echo -e "\033[0;32m[+]\033[0m $1"; }
+            log_warn() { echo -e "\033[1;33m[!]\033[0m $1"; }
+            log_info "Dirsearch: $host"
+            dirsearch -u "https://$host" -w "$WORDLIST" \
+                -t "$DIRSEARCH_THREADS" --random-agent --exclude-status 404,400,500,502,503 \
+                -o "$BRUTE_DIR/dirsearch_${host//[^a-zA-Z0-9]/_}.txt" 2>/dev/null || \
+                log_warn "Dirsearch failed for $host"
+        '
 
     # Merge results
     cat "$BRUTE_DIR"/dirsearch_*.txt 2>/dev/null > "$BRUTE_DIR/dirsearch_all.txt" || touch "$BRUTE_DIR/dirsearch_all.txt"
@@ -356,34 +335,40 @@ mkdir -p "$JS_DIR"
 if [ ! -s "$URLS_DIR/javascript_files.txt" ]; then
     log_warn "No JavaScript files found, skipping JS analysis"
 else
-    # 1. LinkFinder - Extract endpoints from JS
+    # 1. LinkFinder - Extract endpoints from JS (parallel, up to 10 at once)
     if command -v linkfinder &> /dev/null || [ -f "/opt/LinkFinder/linkfinder.py" ]; then
-        log_info "Running LinkFinder..."
+        log_info "Running LinkFinder (parallel, up to 10 JS files)..."
 
-        head -n 100 "$URLS_DIR/javascript_files.txt" | while IFS= read -r js_url; do
-            filename=$(echo "$js_url" | md5sum | cut -d' ' -f1)
-
-            if [ -f "/opt/LinkFinder/linkfinder.py" ]; then
-                python3 /opt/LinkFinder/linkfinder.py -i "$js_url" -o cli \
-                    >> "$JS_DIR/linkfinder_endpoints.txt" 2>/dev/null || true
-            else
-                linkfinder -i "$js_url" -o cli >> "$JS_DIR/linkfinder_endpoints.txt" 2>/dev/null || true
-            fi
-        done
+        export JS_DIR
+        head -n 100 "$URLS_DIR/javascript_files.txt" | \
+            tr '\n' '\0' | \
+            xargs -0 -P 10 -I{} bash -c '
+                js_url="{}"
+                if [ -f "/opt/LinkFinder/linkfinder.py" ]; then
+                    python3 /opt/LinkFinder/linkfinder.py -i "$js_url" -o cli \
+                        >> "$JS_DIR/linkfinder_endpoints.txt" 2>/dev/null || true
+                else
+                    linkfinder -i "$js_url" -o cli >> "$JS_DIR/linkfinder_endpoints.txt" 2>/dev/null || true
+                fi
+            '
 
         sort -u "$JS_DIR/linkfinder_endpoints.txt" -o "$JS_DIR/linkfinder_endpoints.txt" 2>/dev/null || true
     else
         log_warn "LinkFinder not found"
     fi
 
-    # 2. SecretFinder - Find secrets in JS
+    # 2. SecretFinder - Find secrets in JS (parallel, up to 10 at once)
     if [ -f "/opt/SecretFinder/SecretFinder.py" ]; then
-        log_info "Running SecretFinder..."
+        log_info "Running SecretFinder (parallel, up to 10 JS files)..."
 
-        head -n 100 "$URLS_DIR/javascript_files.txt" | while IFS= read -r js_url; do
-            python3 /opt/SecretFinder/SecretFinder.py -i "$js_url" -o cli \
-                >> "$JS_DIR/secretfinder_secrets.txt" 2>/dev/null || true
-        done
+        export JS_DIR
+        head -n 100 "$URLS_DIR/javascript_files.txt" | \
+            tr '\n' '\0' | \
+            xargs -0 -P 10 -I{} bash -c '
+                js_url="{}"
+                python3 /opt/SecretFinder/SecretFinder.py -i "$js_url" -o cli \
+                    >> "$JS_DIR/secretfinder_secrets.txt" 2>/dev/null || true
+            '
 
         sort -u "$JS_DIR/secretfinder_secrets.txt" -o "$JS_DIR/secretfinder_secrets.txt" 2>/dev/null || true
     else
