@@ -65,10 +65,11 @@ phase1_discovery:
     timeout: 10
     follow_redirects: true
 
-  # Active discovery
+  # Active discovery (always runs with bundled wordlist if no crt.sh/API keys)
   active_discovery:
-    enabled: false  # Set to true for DNS bruteforcing
-    wordlist: "/usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+    enabled: true
+    # Priority: RECONX_SUBDOMAIN_WORDLIST env > data/wordlists/subdomains.txt (bundled) > seclists
+    wordlist: "data/wordlists/subdomains.txt"  # bundled; override with /usr/share/seclists/... if installed
 
 # Phase 2: Intelligence Settings
 phase2_intel:
