@@ -104,6 +104,11 @@ class ReconX:
             2: int(os.getenv("RECONX_PHASE2_TIMEOUT", str(max(self.phase_timeout_default, 7200)))),
             3: int(os.getenv("RECONX_PHASE3_TIMEOUT", str(max(self.phase_timeout_default, 10800)))),
             4: int(os.getenv("RECONX_PHASE4_TIMEOUT", str(max(self.phase_timeout_default, 14400)))),
+            5: int(os.getenv("RECONX_PHASE5_TIMEOUT", str(max(self.phase_timeout_default, 3600)))),
+            6: int(os.getenv("RECONX_PHASE6_TIMEOUT", str(max(self.phase_timeout_default, 3600)))),
+            7: int(os.getenv("RECONX_PHASE7_TIMEOUT", str(max(self.phase_timeout_default, 1800)))),
+            8: int(os.getenv("RECONX_PHASE8_TIMEOUT", str(max(self.phase_timeout_default, 1800)))),
+            9: int(os.getenv("RECONX_PHASE9_TIMEOUT", str(max(self.phase_timeout_default, 1800)))),
         }
 
         # Initialize output directory
@@ -475,7 +480,7 @@ Attack Surface Management Framework
     def scan_target(self, target: str, phases: List[int] = None) -> bool:
         """Perform reconnaissance on a single target"""
         if phases is None:
-            phases = [1, 2, 3, 4]
+            phases = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
         if self.test_mode:
             return self.scan_target_test_mode(target, phases)
@@ -491,7 +496,11 @@ Attack Surface Management Framework
 
         success = True
 
-        phase_names = {1: "Discovery", 2: "Intelligence", 3: "Content", 4: "Vulnerability"}
+        phase_names = {
+            1: "Discovery", 2: "Intelligence", 3: "Content", 4: "Vulnerability",
+            5: "Threat Intel", 6: "CVE Correlation", 7: "Change Detection",
+            8: "Compliance", 9: "Attack Graph",
+        }
         active_phases = [p for p in phases if p in phase_names]
 
         try:
@@ -568,6 +577,51 @@ Attack Surface Management Framework
                                 if self.continue_on_fail:
                                     self.logger.warning("Continuing after Phase 4 failure")
 
+                    # Phase 5: Threat Intelligence
+                    elif phase_num == 5 and (success or self.continue_on_fail):
+                        self.log_phase(f"Phase 5: Threat Intelligence - {target}")
+                        if not self.run_module("05_threat_intel.sh", target, target_dir, timeout=self.phase_timeouts[5]):
+                            self.logger.error("Phase 5 failed")
+                            success = False
+                            if self.continue_on_fail:
+                                self.logger.warning("Continuing after Phase 5 failure")
+
+                    # Phase 6: CVE Correlation & Risk Scoring
+                    elif phase_num == 6 and (success or self.continue_on_fail):
+                        self.log_phase(f"Phase 6: CVE Correlation & Risk Scoring - {target}")
+                        if not self.run_module("06_cve_correlation.sh", target, target_dir, timeout=self.phase_timeouts[6]):
+                            self.logger.error("Phase 6 failed")
+                            success = False
+                            if self.continue_on_fail:
+                                self.logger.warning("Continuing after Phase 6 failure")
+
+                    # Phase 7: Change Detection
+                    elif phase_num == 7 and (success or self.continue_on_fail):
+                        self.log_phase(f"Phase 7: Change Detection & Alerting - {target}")
+                        if not self.run_module("07_change_detection.sh", target, target_dir, timeout=self.phase_timeouts[7]):
+                            self.logger.error("Phase 7 failed")
+                            success = False
+                            if self.continue_on_fail:
+                                self.logger.warning("Continuing after Phase 7 failure")
+
+                    # Phase 8: Compliance Mapping
+                    elif phase_num == 8 and (success or self.continue_on_fail):
+                        self.log_phase(f"Phase 8: Compliance Framework Mapping - {target}")
+                        if not self.run_module("08_compliance.sh", target, target_dir, timeout=self.phase_timeouts[8]):
+                            self.logger.error("Phase 8 failed")
+                            success = False
+                            if self.continue_on_fail:
+                                self.logger.warning("Continuing after Phase 8 failure")
+
+                    # Phase 9: Attack Graph
+                    elif phase_num == 9 and (success or self.continue_on_fail):
+                        self.log_phase(f"Phase 9: Attack Surface Graph Construction - {target}")
+                        if not self.run_module("09_attack_graph.sh", target, target_dir, timeout=self.phase_timeouts[9]):
+                            self.logger.error("Phase 9 failed")
+                            success = False
+                            if self.continue_on_fail:
+                                self.logger.warning("Continuing after Phase 9 failure")
+
         except Exception as e:
             self.logger.error(f"Error scanning {target}: {e}")
             success = False
@@ -599,7 +653,7 @@ Attack Surface Management Framework
     def run(self, phases: List[int] = None):
         """Main execution method"""
         if phases is None:
-            phases = [1, 2, 3, 4]
+            phases = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
         start_time = time.time()
 

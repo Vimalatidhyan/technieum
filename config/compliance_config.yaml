@@ -1,0 +1,45 @@
+# ReconX Enterprise — Compliance Framework Configuration
+
+frameworks:
+  enabled:
+    - pci_dss
+    - hipaa
+    - gdpr
+    - soc2
+    - nist_csf
+
+  pci_dss:
+    version: "4.0"
+    scope: all             # all | in_scope_only
+    fail_on_critical: true
+
+  hipaa:
+    version: "2013"
+    include_technical_safeguards: true
+    include_administrative_safeguards: false
+
+  gdpr:
+    jurisdiction: EU
+    include_article_32: true
+
+  soc2:
+    trust_service_criteria:
+      - security
+      - availability
+      - confidentiality
+
+  nist_csf:
+    version: "2.0"
+    tiers: [1, 2, 3, 4]
+
+thresholds:
+  compliance_fail_below: 70      # % compliance; below this = non-compliant
+  critical_control_weight: 3.0
+  high_control_weight: 2.0
+  medium_control_weight: 1.0
+  low_control_weight: 0.5
+
+evidence:
+  auto_collect: true
+  output_dir: evidence
+  retention_days: 365

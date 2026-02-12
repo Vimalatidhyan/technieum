@@ -1,0 +1,56 @@
+# ReconX Enterprise — Alert Rules Configuration
+
+rules:
+
+  - id: new_critical_vulnerability
+    name: "New Critical Vulnerability Discovered"
+    condition: "new_vulnerability AND severity == critical"
+    severity: critical
+    notify: [slack, email, webhook]
+    cooldown_minutes: 0        # alert every time
+
+  - id: new_high_vulnerability
+    name: "New High Vulnerability Discovered"
+    condition: "new_vulnerability AND severity == high"
+    severity: high
+    notify: [slack, webhook]
+    cooldown_minutes: 60
+
+  - id: new_subdomain
+    name: "New Subdomain Detected"
+    condition: "new_subdomain"
+    severity: medium
+    notify: [slack]
+    cooldown_minutes: 60
+
+  - id: compliance_degradation
+    name: "Compliance Score Degraded"
+    condition: "compliance_percentage < previous_compliance_percentage - 5"
+    severity: high
+    notify: [email, slack]
+    cooldown_minutes: 1440
+
+  - id: port_exposed
+    name: "Risky Port Newly Exposed"
+    condition: "new_port AND port IN [21,23,445,3389,5900]"
+    severity: high
+    notify: [slack, webhook]
+    cooldown_minutes: 0
+
+  - id: data_leak_detected
+    name: "Data Leak / Credential Exposure Detected"
+    condition: "data_leak"
+    severity: critical
+    notify: [slack, email, webhook]
+    cooldown_minutes: 0
+
+  - id: kev_vulnerability
+    name: "CISA KEV Vulnerability Present"
+    condition: "vulnerability AND in_kev == true"
+    severity: critical
+    notify: [slack, email]
+    cooldown_minutes: 0
+
+thresholds:
+  max_alerts_per_hour: 50
+  dedup_window_minutes: 15

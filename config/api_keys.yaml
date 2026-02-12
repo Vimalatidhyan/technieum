@@ -1,0 +1,22 @@
+# ReconX Enterprise — API Key Configuration
+# NEVER commit real keys. Use environment variables or a secrets manager.
+# Each key below can also be set as the corresponding env var.
+
+threat_intel:
+  greynoise_api_key: ""          # env: GREYNOISE_API_KEY
+  abuseipdb_api_key: ""          # env: ABUSEIPDB_API_KEY
+  alienvault_otx_key: ""         # env: OTX_API_KEY
+  crowdsec_api_key: ""           # env: CROWDSEC_API_KEY
+  dehashed_email: ""             # env: DEHASHED_EMAIL
+  dehashed_api_key: ""           # env: DEHASHED_KEY
+  virustotal_api_key: ""         # env: VIRUSTOTAL_API_KEY
+  shodan_api_key: ""             # env: SHODAN_API_KEY
+  censys_api_id: ""              # env: CENSYS_API_ID
+  censys_api_secret: ""          # env: CENSYS_API_SECRET
+
+vulnerability:
+  nvd_api_key: ""                # env: NVD_API_KEY — removes rate limits on NVD CVE API
+
+scanning:
+  github_token: ""               # env: GITHUB_TOKEN — for GitHub dorking
+  emailrep_api_key: ""           # env: EMAILREP_API_KEY

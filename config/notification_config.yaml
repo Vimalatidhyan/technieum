@@ -1,0 +1,35 @@
+# ReconX Enterprise — Notification Configuration
+
+slack:
+  enabled: false
+  webhook_url: ""              # env: SLACK_WEBHOOK_URL
+  channel: "#reconx-alerts"
+  username: "ReconX"
+  icon_emoji: ":warning:"
+
+email:
+  enabled: false
+  smtp_host: "smtp.example.com"
+  smtp_port: 587
+  smtp_tls: true
+  username: ""                 # env: EMAIL_USERNAME
+  password: ""                 # env: EMAIL_PASSWORD
+  from_address: "reconx@example.com"
+  to_addresses:
+    - "security@example.com"
+
+webhook:
+  enabled: false
+  url: ""                      # env: WEBHOOK_URL
+  secret: ""                   # env: WEBHOOK_SECRET — HMAC-SHA256 signing key
+  timeout_seconds: 10
+  retry_attempts: 3
+  retry_backoff_seconds: 5
+
+teams:
+  enabled: false
+  webhook_url: ""              # env: TEAMS_WEBHOOK_URL
+
+discord:
+  enabled: false
+  webhook_url: ""              # env: DISCORD_WEBHOOK_URL

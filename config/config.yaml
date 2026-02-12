@@ -1,0 +1,56 @@
+# ReconX Enterprise v2.0 — Main Configuration
+# Copy to config/config.local.yaml and override values as needed.
+
+general:
+  threads: 5
+  timeout: 3600          # default phase timeout in seconds
+  output_dir: output
+  log_level: INFO
+
+database:
+  url: "sqlite:///reconx.db"
+  pool_size: 10
+  echo: false
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+  secret_key: "CHANGE_ME_IN_PRODUCTION"
+  token_expiry_hours: 24
+
+rate_limits:
+  default: 1000          # requests per hour
+  premium: 5000
+  scan_creation: 100
+  threat_intel_api: 500
+
+cors:
+  allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8080"
+
+scheduler:
+  enabled: true
+  timezone: "UTC"
+  max_concurrent_scans: 3
+
+scanning:
+  default_phases: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  max_subdomains: 5000
+  rate_limit_rps: 10
+
+threat_intel:
+  cache_ttl_hours: 24
+  confidence_threshold: 60
+
+reporting:
+  pdf_engine: weasyprint
+  output_dir: reports
+  retention_days: 90
+
+notifications:
+  enabled: false
+  slack_webhook_url: ""
+  email_smtp_host: ""
+  email_from: "reconx@example.com"
