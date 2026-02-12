@@ -1,0 +1,21 @@
+# ReconX Python Requirements
+# Install with: pip3 install -r requirements.txt
+
+# Config and environment
+pyyaml>=6.0.0
+python-dotenv>=1.0.0
+
+# CLI and formatting
+colorama>=0.4.6
+tqdm>=4.66.0
+tabulate>=0.9.0
+
+# XML/HTML parsing (used by parsers/parser.py for nmap XML)
+lxml>=4.9.3
+
+# Database
+# SQLite3 is built into Python
+
+# API server (optional)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
