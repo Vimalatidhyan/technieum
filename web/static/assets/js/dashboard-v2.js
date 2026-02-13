@@ -1,446 +1,303 @@
 /**
- * ReconX Enterprise - Dashboard v2.0
- * Production-ready dashboard with KPI cards, real-time updates, and modern UI
+ * ReconX Enterprise — Dashboard v2.0
+ * Wired to: GET /api/v1/scans, /api/v1/assets/targets, /api/v1/assets/stats/{t}, /api/v1/findings/{t}/summary
  */
 
-const API_BASE = window.location.origin;
-const API_V1 = `${API_BASE}/api/v1`;
+const API = '/api/v1';
 
-// State management
 const state = {
   targets: [],
   scans: [],
-  stats: {
-    critical: 0,
-    high: 0,
-    assets: 0,
-    activeScans: 0
-  },
-  refreshInterval: null
+  stats: { critical: 0, high: 0, assets: 0, activeScans: 0 },
+  timer: null
 };
 
-// ============================================================================
-// INITIALIZATION
-// ============================================================================
+// ─── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  initializeEventListeners();
-  loadDashboardData();
-  startAutoRefresh();
+  initSidebar();
+  bindEvents();
+  loadDashboard();
+  state.timer = setInterval(() => loadDashboard(true), 30000);
 });
 
-function initializeEventListeners() {
-  document.getElementById('startScan')?.addEventListener('click', handleStartScan);
-  document.getElementById('refreshTargets')?.addEventListener('click', () => loadTargets());
-  document.getElementById('viewAllScans')?.addEventListener('click', () => {
-    window.location.href = '/scan_viewer.html';
-  });
+function bindEvents() {
+  el('startScan')?.addEventListener('click', startScan);
+  el('refreshTargets')?.addEventListener('click', () => loadDashboard());
+  checkApiHealth();
 }
 
-function startAutoRefresh() {
-  // Refresh dashboard every 30 seconds
-  state.refreshInterval = setInterval(() => {
-    loadDashboardData(false); // Silent refresh
-  }, 30000);
-}
-
-// ============================================================================
-// DATA LOADING
-// ============================================================================
-async function loadDashboardData(showLoading = true) {
+async function checkApiHealth() {
+  const dot = el('apiHealthDot');
+  if (!dot) return;
   try {
-    await Promise.all([
-      loadStats(),
-      loadTargets(showLoading),
-      loadRecentScans(showLoading)
+    const res = await fetch(`${API}/health`);
+    dot.style.color = res.ok ? 'var(--green)' : 'var(--red)';
+    dot.title = res.ok ? 'API Online' : 'API Error';
+  } catch {
+    dot.style.color = 'var(--red)';
+    dot.title = 'API Offline';
+  }
+}
+
+// ─── Data Loading ─────────────────────────────────────────────────────────────
+async function loadDashboard(silent = false) {
+  try {
+    const [targetsRes, scansRes] = await Promise.all([
+      api('/assets/targets'),
+      api('/scans')
     ]);
-  } catch (error) {
-    console.error('Failed to load dashboard data:', error);
-    showError('Failed to load dashboard data. Please refresh the page.');
-  }
-}
 
-async function loadStats() {
-  try {
-    // Load findings by severity
-    const response = await fetch(`${API_V1}/findings/by-severity`, {
-      headers: getHeaders()
+    const targets = targetsRes?.targets || [];
+    const scans = scansRes?.scans || [];
+
+    state.targets = targets;
+    state.scans = scans;
+    state.stats.assets = targets.length;
+    state.stats.activeScans = scans.filter(s => s.status === 'running').length;
+
+    // Aggregate findings across all targets
+    let totalCritical = 0, totalHigh = 0;
+    const summaryPromises = targets.slice(0, 20).map(t =>
+      api(`/findings/${encodeURIComponent(t)}/summary`).catch(() => null)
+    );
+    const summaries = await Promise.all(summaryPromises);
+    summaries.forEach(s => {
+      if (s) {
+        totalCritical += s.critical || 0;
+        totalHigh += s.high || 0;
+      }
     });
-    
-    if (response.ok) {
-      const data = await response.json();
-      state.stats.critical = data.critical || 0;
-      state.stats.high = data.high || 0;
-      updateKPICards();
-    }
+    state.stats.critical = totalCritical;
+    state.stats.high = totalHigh;
 
-    // Load asset count
-    const assetsResponse = await fetch(`${API_V1}/assets/subdomains?per_page=1`, {
-      headers: getHeaders()
-    });
-    
-    if (assetsResponse.ok) {
-      const assetsData = await assetsResponse.json();
-      state.stats.assets = assetsData.total || 0;
-      updateKPICards();
-    }
-
-    // Load active scans
-    const scansResponse = await fetch(`${API_V1}/scans/?per_page=100`, {
-      headers: getHeaders()
-    });
-    
-    if (scansResponse.ok) {
-      const scansData = await scansResponse.json();
-      state.stats.activeScans = scansData.items?.filter(s => s.status === 'running').length || 0;
-      updateKPICards();
-    }
-  } catch (error) {
-    console.error('Failed to load stats:', error);
-  }
-}
-
-async function loadTargets(showLoading = true) {
-  const loadingEl = document.getElementById('targetsLoading');
-  const listEl = document.getElementById('targetsList');
-  
-  if (showLoading) {
-    loadingEl?.classList.remove('hidden');
-    listEl?.classList.add('hidden');
-  }
-
-  try {
-    const response = await fetch(`${API_V1}/scans/`, {
-      headers: getHeaders()
-    });
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-    const data = await response.json();
-    state.targets = getUniqueTargets(data.items || []);
+    renderStats();
     renderTargets();
-    
-    loadingEl?.classList.add('hidden');
-    listEl?.classList.remove('hidden');
-  } catch (error) {
-    console.error('Failed to load targets:', error);
-    loadingEl.innerHTML = `<div class="empty-state"><p style="color: var(--danger);">Failed to load targets</p></div>`;
-  }
-}
-
-async function loadRecentScans(showLoading = true) {
-  const loadingEl = document.getElementById('scansLoading');
-  const listEl = document.getElementById('scansList');
-
-  if (showLoading) {
-    loadingEl?.classList.remove('hidden');
-    listEl?.classList.add('hidden');
-  }
-
-  try {
-    const response = await fetch(`${API_V1}/scans/?per_page=10`, {
-      headers: getHeaders()
-    });
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-    const data = await response.json();
-    state.scans = data.items || [];
     renderScans();
-    
-    loadingEl?.classList.add('hidden');
-    listEl?.classList.remove('hidden');
-  } catch (error) {
-    console.error('Failed to load scans:', error);
-    loadingEl.innerHTML = `<div class="empty-state"><p style="color: var(--danger);">Failed to load scans</p></div>`;
+
+    // Update sidebar badge
+    const badge = el('sidebarVulnCount');
+    if (badge) badge.textContent = totalCritical + totalHigh;
+
+  } catch (err) {
+    console.error('Dashboard load failed:', err);
+    if (!silent) toast('Failed to connect to API. Is the server running?', 'error');
+    renderOfflineState();
   }
 }
 
-// ============================================================================
-// RENDERING
-// ============================================================================
-function updateKPICards() {
-  const criticalEl = document.getElementById('criticalCount');
-  const highEl = document.getElementById('highCount');
-  const assetEl = document.getElementById('assetCount');
-  const activeScanEl = document.getElementById('activeScanCount');
-
-  if (criticalEl) animateValue(criticalEl, parseInt(criticalEl.textContent) || 0, state.stats.critical, 500);
-  if (highEl) animateValue(highEl, parseInt(highEl.textContent) || 0, state.stats.high, 500);
-  if (assetEl) animateValue(assetEl, parseInt(assetEl.textContent) || 0, state.stats.assets, 500);
-  if (activeScanEl) animateValue(activeScanEl, parseInt(activeScanEl.textContent) || 0, state.stats.activeScans, 500);
-}
-
-function animateValue(el, start, end, duration) {
-  const startTime = performance.now();
-  const diff = end - start;
-
-  function update(currentTime) {
-    const elapsed = currentTime - startTime;
-    const progress = Math.min(elapsed / duration, 1);
-    const current = Math.floor(start + diff * easeOutQuad(progress));
-    el.textContent = current.toLocaleString();
-
-    if (progress < 1) {
-      requestAnimationFrame(update);
-    }
-  }
-
-  requestAnimationFrame(update);
-}
-
-function easeOutQuad(t) {
-  return t * (2 - t);
+// ─── Rendering ────────────────────────────────────────────────────────────────
+function renderStats() {
+  animateNum('criticalCount', state.stats.critical);
+  animateNum('highCount', state.stats.high);
+  animateNum('assetCount', state.stats.assets);
+  animateNum('activeScanCount', state.stats.activeScans);
 }
 
 function renderTargets() {
-  const listEl = document.getElementById('targetsList');
-  if (!listEl || state.targets.length === 0) {
-    listEl.innerHTML = '<div class="empty-state"><p>No targets found. Start a scan to begin monitoring.</p></div>';
+  const container = el('targetsContainer');
+  if (!container) return;
+
+  if (state.targets.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>No targets found. Start an assessment to begin monitoring.</p></div>';
     return;
   }
 
   const grid = document.createElement('div');
-  grid.className = 'kpi-grid';
-  grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+  grid.className = 'stats-grid';
+  grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(180px, 1fr))';
 
-  state.targets.forEach(target => {
+  state.targets.slice(0, 8).forEach(t => {
+    const scanCount = state.scans.filter(s => s.target === t).length || 1;
     const card = document.createElement('div');
-    card.className = 'kpi-card';
+    card.className = 'stat-card';
+    card.style.cursor = 'pointer';
     card.innerHTML = `
-      <div class="kpi-header">
-        <span class="kpi-label">${escapeHtml(target.name)}</span>
-      </div>
-      <div class="kpi-value" style="font-size: 1.5rem;">${target.scanCount}</div>
-      <div class="kpi-change">
-        <span class="text-muted">${target.scanCount === 1 ? 'scan' : 'scans'}</span>
-      </div>
+      <div class="stat-label truncate">${esc(t)}</div>
+      <div class="stat-value" style="font-size:1.25rem;">${scanCount}</div>
+      <div class="stat-change"><span class="muted">${scanCount === 1 ? 'scan' : 'scans'}</span></div>
     `;
+    card.onclick = () => window.location.href = `/assessments`;
     grid.appendChild(card);
   });
 
-  listEl.innerHTML = '';
-  listEl.appendChild(grid);
+  container.innerHTML = '';
+  container.appendChild(grid);
 }
 
 function renderScans() {
-  const tbody = document.getElementById('scansTableBody');
+  const tbody = el('scansTableBody');
   if (!tbody) return;
 
   if (state.scans.length === 0) {
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="7" class="text-center" style="padding: 2rem;">
-          <p class="text-muted">No scans found. Start your first scan above.</p>
-        </td>
-      </tr>
-    `;
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">No assessments yet. Start your first scan above.</td></tr>';
     return;
   }
 
-  tbody.innerHTML = state.scans.map(scan => {
-    const duration = scan.completed_at 
-      ? formatDuration(new Date(scan.started_at), new Date(scan.completed_at))
-      : formatDuration(new Date(scan.started_at), new Date());
-    
-    const findingsCount = (scan.findings_count || 0);
-    
-    return `
-      <tr>
-        <td><span class="font-mono">#${scan.id}</span></td>
-        <td><strong>${escapeHtml(scan.target)}</strong></td>
-        <td><span class="status-badge status-${scan.status}">${scan.status}</span></td>
-        <td><span class="text-muted">${formatDateTime(scan.started_at)}</span></td>
-        <td><span class="font-mono">${duration}</span></td>
-        <td>
-          ${findingsCount > 0 
-            ? `<span class="badge badge-${getSeverityClass(findingsCount)}">${findingsCount}</span>`
-            : `<span class="text-muted">—</span>`
-          }
-        </td>
-        <td class="table-actions">
-          <button class="btn btn-sm btn-ghost" onclick="viewScan(${scan.id})">View</button>
-        </td>
-      </tr>
-    `;
+  tbody.innerHTML = state.scans.slice(0, 10).map(s => {
+    const phases = s.phases || {};
+    const phaseHtml = Object.entries(phases).map(([k, done]) => {
+      const num = k.split('_')[0];
+      return `<span class="badge ${done ? 'badge-success' : 'badge-info'}" style="font-size:0.625rem;margin-right:2px;">${num}</span>`;
+    }).join('');
+
+    return `<tr>
+      <td class="font-mono" style="font-size:0.75rem;">${esc(s.scan_id).slice(0, 20)}</td>
+      <td><strong>${esc(s.target)}</strong></td>
+      <td><span class="status status-${s.status}">${s.status}</span></td>
+      <td>${phaseHtml || '—'}</td>
+      <td class="text-muted">${fmtTime(s.started_at)}</td>
+      <td class="table-actions">
+        <a href="/assessments" class="btn btn-ghost btn-sm">View</a>
+      </td>
+    </tr>`;
   }).join('');
 }
 
-// ============================================================================
-// ACTIONS
-// ============================================================================
-async function handleStartScan() {
-  const targetInput = document.getElementById('target');
-  const phasesInput = document.getElementById('phases');
-  const testModeCheck = document.getElementById('testMode');
-  const msgEl = document.getElementById('scanMsg');
-  const startBtn = document.getElementById('startScan');
+function renderOfflineState() {
+  const tbody = el('scansTableBody');
+  if (tbody) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">API offline — start the server with: uvicorn api.server:app --port 8000</td></tr>';
+  }
+  const container = el('targetsContainer');
+  if (container) {
+    container.innerHTML = '<div class="empty-state"><p class="text-muted">API server not connected</p></div>';
+  }
+}
 
-  const target = targetInput?.value.trim();
-  const phases = phasesInput?.value.trim();
-  const testMode = testModeCheck?.checked;
+// ─── Actions ──────────────────────────────────────────────────────────────────
+async function startScan() {
+  const target = el('target')?.value.trim();
+  const phases = el('phases')?.value.trim() || '1,2,3,4';
+  const testMode = el('testMode')?.checked || false;
+  const msg = el('scanMsg');
 
   if (!target) {
-    showMessage(msgEl, 'Please enter a target domain', 'error');
+    showMsg(msg, 'Please enter a target domain', 'error');
     return;
   }
 
-  startBtn.disabled = true;
-  startBtn.innerHTML = '<span class="loading-spinner"></span><span>Starting...</span>';
+  const btn = el('startScan');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;"></span> Starting...';
 
   try {
-    const response = await fetch(`${API_V1}/scans/`, {
+    const params = new URLSearchParams({ target, phases, test_mode: testMode });
+    const res = await fetch(`${API}/scans?${params}`, {
       method: 'POST',
-      headers: {
-        ...getHeaders(),
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        target,
-        phases: phases || '1,2,3,4',
-        test_mode: testMode
-      })
+      headers: hdrs()
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Failed to start scan');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
     }
 
-    const data = await response.json();
-    showMessage(msgEl, `Scan started successfully! ID: ${data.run_id}`, 'success');
-    
-    // Refresh data
-    setTimeout(() => {
-      loadDashboardData(false);
-    }, 1000);
+    const data = await res.json();
+    showMsg(msg, `Assessment started! ID: ${data.scan_id}`, 'success');
+    toast('Assessment started successfully', 'success');
 
-    // Redirect to scan viewer
-    setTimeout(() => {
-      window.location.href = `/scan_viewer.html?id=${data.run_id}`;
-    }, 1500);
+    setTimeout(() => loadDashboard(), 1000);
+    setTimeout(() => { window.location.href = '/assessments'; }, 2000);
 
-  } catch (error) {
-    console.error('Scan start failed:', error);
-    showMessage(msgEl, error.message, 'error');
+  } catch (err) {
+    showMsg(msg, err.message, 'error');
+    toast(err.message, 'error');
   } finally {
-    startBtn.disabled = false;
-    startBtn.innerHTML = '<span>Start Scan</span>';
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> Start Scan';
   }
 }
 
-function viewScan(scanId) {
-  window.location.href = `/scan_viewer.html?id=${scanId}`;
+// ─── Utilities ────────────────────────────────────────────────────────────────
+function el(id) { return document.getElementById(id); }
+
+function hdrs() {
+  return { 'X-API-Key': localStorage.getItem('reconx_api_key') || 'demo_key' };
 }
 
-// ============================================================================
-// UTILITIES
-// ============================================================================
-function getHeaders() {
-  // In production, retrieve API key from secure storage
-  const apiKey = localStorage.getItem('reconx_api_key') || 'demo_key';
-  return {
-    'X-API-Key': apiKey
-  };
+async function api(path) {
+  const res = await fetch(`${API}${path}`, { headers: hdrs() });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
 }
 
-function getUniqueTargets(scans) {
-  const targetMap = new Map();
-  
-  scans.forEach(scan => {
-    const target = scan.target;
-    if (targetMap.has(target)) {
-      targetMap.get(target).scanCount++;
-    } else {
-      targetMap.set(target, {
-        name: target,
-        scanCount: 1
-      });
-    }
-  });
-
-  return Array.from(targetMap.values())
-    .sort((a, b) => b.scanCount - a.scanCount)
-    .slice(0, 6); // Top 6 targets
+function esc(text) {
+  const d = document.createElement('div');
+  d.textContent = text || '';
+  return d.innerHTML;
 }
 
-function showMessage(el, message, type = 'info') {
-  if (!el) return;
-  
-  el.textContent = message;
-  el.className = '';
-  el.classList.add('badge');
-  
-  if (type === 'error') {
-    el.style.background = 'rgba(239, 68, 68, 0.15)';
-    el.style.color = 'var(--danger)';
-  } else if (type === 'success') {
-    el.style.background = 'rgba(16, 185, 129, 0.15)';
-    el.style.color = 'var(--success)';
-  } else {
-    el.style.background = 'rgba(59, 130, 246, 0.15)';
-    el.style.color = 'var(--primary)';
-  }
-  
-  el.style.padding = '0.75rem';
-  el.style.borderRadius = '0.5rem';
-  el.style.display = 'block';
-  el.classList.remove('hidden');
-
-  if (type === 'success') {
-    setTimeout(() => {
-      el.classList.add('hidden');
-    }, 5000);
-  }
-}
-
-function showError(message) {
-  console.error(message);
-  // Could implement toast notifications here
-}
-
-function formatDateTime(dateString) {
-  if (!dateString) return '—';
-  const date = new Date(dateString);
+function fmtTime(str) {
+  if (!str) return '—';
+  const d = new Date(str);
   const now = new Date();
-  const diff = now - date;
-  
-  // Less than 1 minute
+  const diff = now - d;
   if (diff < 60000) return 'Just now';
-  // Less than 1 hour
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  // Less than 24 hours
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  // More than 24 hours
-  return date.toLocaleDateString();
+  return d.toLocaleDateString();
 }
 
-function formatDuration(start, end) {
-  const diff = end - start;
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-
-  if (hours > 0) return `${hours}h ${minutes % 60}m`;
-  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-  return `${seconds}s`;
-}
-
-function getSeverityClass(count) {
-  if (count >= 10) return 'critical';
-  if (count >= 5) return 'high';
-  if (count >= 1) return 'medium';
-  return 'low';
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-// Cleanup on page unload
-window.addEventListener('beforeunload', () => {
-  if (state.refreshInterval) {
-    clearInterval(state.refreshInterval);
+function animateNum(id, target) {
+  const el_ = el(id);
+  if (!el_) return;
+  const start = parseInt(el_.textContent) || 0;
+  if (start === target) return;
+  const duration = 400;
+  const t0 = performance.now();
+  function tick(now) {
+    const p = Math.min((now - t0) / duration, 1);
+    el_.textContent = Math.floor(start + (target - start) * p * (2 - p));
+    if (p < 1) requestAnimationFrame(tick);
   }
-});
+  requestAnimationFrame(tick);
+}
+
+function showMsg(el_, text, type) {
+  if (!el_) return;
+  el_.textContent = text;
+  el_.className = '';
+  el_.style.display = 'block';
+  el_.style.padding = '10px';
+  el_.style.borderRadius = '6px';
+  el_.style.fontSize = '0.8125rem';
+  if (type === 'error') {
+    el_.style.background = 'var(--danger-bg)';
+    el_.style.color = 'var(--danger)';
+  } else {
+    el_.style.background = 'var(--success-bg)';
+    el_.style.color = 'var(--success)';
+  }
+  if (type === 'success') setTimeout(() => { el_.style.display = 'none'; }, 5000);
+}
+
+function toast(msg, type = 'info') {
+  const container = el('toastContainer');
+  if (!container) return;
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  container.appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+// ─── Sidebar Toggle ───────────────────────────────────────────────────────────
+function initSidebar() {
+  const toggle = el('sidebarToggle');
+  const sidebar = el('sidebar');
+  const overlay = el('sidebarOverlay');
+  if (toggle && sidebar) {
+    toggle.addEventListener('click', () => {
+      sidebar.classList.toggle('open');
+      overlay?.classList.toggle('open');
+    });
+  }
+  if (overlay) {
+    overlay.addEventListener('click', () => {
+      sidebar?.classList.remove('open');
+      overlay.classList.remove('open');
+    });
+  }
+}
+
+window.addEventListener('beforeunload', () => { if (state.timer) clearInterval(state.timer); });

@@ -1,625 +1,551 @@
 /**
- * ReconX Enterprise - Graph Visualization v2.0
- * D3.js force-directed graph for attack surface analysis
+ * ReconX Enterprise — Attack Graph Visualization v2.0
+ * Wired to: GET /api/v1/assets/targets, /api/v1/assets/subdomains/{t},
+ *           /api/v1/assets/ports/{t}, /api/v1/findings/{t}
+ * Uses D3.js v7 force-directed graph
  */
 
-const API_BASE = window.location.origin;
-const API_V1 = `${API_BASE}/api/v1`;
-
-// HTML escape utility — prevents XSS when inserting data into innerHTML
-function escapeHtml(text) {
-  if (!text) return '';
-  const map = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#039;'
-  };
-  return String(text).replace(/[&<>"']/g, m => map[m]);
-}
-
-// State management
-const state = {
-  graphData: { nodes: [], links: [] },
-  filteredData: { nodes: [], links: [] },
-  currentScanId: null,
+const API = '/api/v1';
+let state = {
+  targets: [],
+  selectedTarget: '',
+  nodes: [],
+  links: [],
   simulation: null,
   svg: null,
   g: null,
+  zoom: null,
+  showSubdomains: true,
+  showPorts: true,
+  showFindings: true,
   selectedNode: null,
-  attackPaths: [],
-  nodeElements: null,
-  linkElements: null,
-  labelElements: null
+  stats: { nodes: 0, edges: 0, attackPaths: 0, criticalAssets: 0 }
 };
 
-// Color schemes
-const colors = {
-  domain: '#60A5FA',      // Blue
-  subdomain: '#60A5FA',   // Blue
-  ip: '#34D399',          // Green
-  service: '#F59E0B',     // Orange
-  vulnerability: '#DC2626', // Red
-  asset: '#A78BFA'        // Purple
-};
-
-const riskColors = {
-  critical: '#DC2626',
-  high: '#F97316',
-  medium: '#FBBF24',
-  low: '#3B82F6'
-};
-
-// ============================================================================
-// INITIALIZATION
-// ============================================================================
+// ─── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
- initializeSVG();
-  loadScans();
-  checkURLParameters();
+  initSidebar();
+  bindEvents();
+  initGraph();
+  loadTargets();
 });
 
-function checkURLParameters() {
-  const params = new URLSearchParams(window.location.search);
-  const scanId = params.get('id');
-  if (scanId) {
-    document.getElementById('scanSelect').value = scanId;
-    state.currentScanId = parseInt(scanId);
-    loadGraph();
-  }
+function bindEvents() {
+  el('targetSelect')?.addEventListener('change', onTargetChange);
+  el('showSubdomains')?.addEventListener('change', onOptionsChange);
+  el('showPorts')?.addEventListener('change', onOptionsChange);
+  el('showFindings')?.addEventListener('change', onOptionsChange);
+  el('resetGraphBtn')?.addEventListener('click', resetZoom);
+  el('exportSvgBtn')?.addEventListener('click', exportSVG);
+  el('findPathsBtn')?.addEventListener('click', findAttackPaths);
+  el('closeNodePanel')?.addEventListener('click', closeNodePanel);
+  window.addEventListener('resize', debounce(resizeGraph, 250));
 }
 
-function initializeSVG() {
-  const container = document.getElementById('graphContainer');
-  const width = container.clientWidth;
-  const height = container.clientHeight;
-
-  // Create SVG
-  state.svg = d3.select('#graphContainer')
-    .append('svg')
-    .attr('width', width)
-    .attr('height', height)
-    .style('background', 'var(--bg-dark)');
-
-  // Add zoom behavior
-  const zoom = d3.zoom()
-    .scaleExtent([0.1, 4])
-    .on('zoom', (event) => {
-      state.g.attr('transform', event.transform);
-    });
-
-  state.svg.call(zoom);
-
-  // Main group for zoom/pan
-  state.g = state.svg.append('g');
-
-  // Initialize force simulation
-  state.simulation = d3.forceSimulation()
-    .force('link', d3.forceLink().id(d => d.id).distance(100))
-    .force('charge', d3.forceManyBody().strength(-300))
-    .force('center', d3.forceCenter(width / 2, height / 2))
-    .force('collision', d3.forceCollide().radius(30));
-}
-
-// ============================================================================
-// DATA LOADING
-// ============================================================================
-async function loadScans() {
+// ─── Data ─────────────────────────────────────────────────────────────────────
+async function loadTargets() {
   try {
-    const response = await fetch(`${API_V1}/scans/?per_page=100`, {
-      headers: getHeaders()
-    });
-
-    if (!response.ok) return;
-
-    const data = await response.json();
-    const scanSelect = document.getElementById('scanSelect');
-    
-    data.items?.forEach(scan => {
-      const option = document.createElement('option');
-      option.value = scan.id;
-      option.textContent = `#${scan.id} - ${scan.target} (${scan.status})`;
-      scanSelect.appendChild(option);
-    });
-  } catch (error) {
-    console.error('Failed to load scans:', error);
+    const data = await apiGet('/assets/targets');
+    state.targets = data?.targets || [];
+    renderTargetSelect();
+    if (state.targets.length > 0) {
+      state.selectedTarget = state.targets[0];
+      el('targetSelect').value = state.selectedTarget;
+      loadGraphData();
+    }
+  } catch (err) {
+    console.error('Targets load failed:', err);
+    showEmptyState('API not connected. Start the server first.');
   }
 }
 
-async function loadGraph() {
-  const scanId = document.getElementById('scanSelect').value;
-  if (!scanId) return;
+async function loadGraphData() {
+  if (!state.selectedTarget) return;
+  const target = encodeURIComponent(state.selectedTarget);
 
-  state.currentScanId = parseInt(scanId);
-  showLoading();
+  showLoading(true);
 
   try {
-    const response = await fetch(`${API_V1}/intelligence/graph/${scanId}`, {
-      headers: getHeaders()
-    });
+    const results = await Promise.all([
+      state.showSubdomains ? apiGet(`/assets/subdomains/${target}`).catch(() => ({ subdomains: [] })) : { subdomains: [] },
+      state.showPorts ? apiGet(`/assets/ports/${target}`).catch(() => ({ ports: [] })) : { ports: [] },
+      state.showFindings ? apiGet(`/findings/${target}`).catch(() => ({ findings: [] })) : { findings: [] }
+    ]);
 
-    if (!response.ok) throw new Error('Failed to load graph data');
-
-    const data = await response.json();
-    state.graphData = transformGraphData(data);
-    state.filteredData = JSON.parse(JSON.stringify(state.graphData)); // Deep copy
-
-    updateStats();
-    filterGraph(); // Apply initial filters
-    renderGraph();
-    hideLoading();
-
-  } catch (error) {
-    console.error('Failed to load graph:', error);
-    showError('Failed to load graph data. The scan may not have intelligence data yet.');
+    buildGraph(
+      results[0]?.subdomains || [],
+      results[1]?.ports || [],
+      results[2]?.findings || []
+    );
+  } catch (err) {
+    console.error('Graph data load failed:', err);
+    showEmptyState('Failed to load target data.');
+  } finally {
+    showLoading(false);
   }
 }
 
-function transformGraphData(apiData) {
-  // Transform API response to D3-compatible format
+function onTargetChange() {
+  state.selectedTarget = el('targetSelect')?.value || '';
+  if (state.selectedTarget) loadGraphData();
+}
+
+function onOptionsChange() {
+  state.showSubdomains = el('showSubdomains')?.checked ?? true;
+  state.showPorts = el('showPorts')?.checked ?? true;
+  state.showFindings = el('showFindings')?.checked ?? true;
+  if (state.selectedTarget) loadGraphData();
+}
+
+// ─── Graph Construction ───────────────────────────────────────────────────────
+function buildGraph(subdomains, ports, findings) {
   const nodes = [];
   const links = [];
-  const nodeMap = new Map();
+  const nodeMap = {};
 
-  // Process nodes from API
-  if (apiData.nodes) {
-    apiData.nodes.forEach((node, index) => {
-      const nodeData = {
-        id: node.id || `node_${index}`,
-        label: node.label || node.name || node.id,
-        type: node.type || 'asset',
-        risk_score: node.risk_score || 0,
-        metadata: node.metadata || {}
-      };
-      nodes.push(nodeData);
-      nodeMap.set(nodeData.id, nodeData);
-    });
-  }
+  // Root target node
+  const rootId = `target:${state.selectedTarget}`;
+  nodes.push({ id: rootId, label: state.selectedTarget, type: 'target', size: 28, data: {} });
+  nodeMap[rootId] = true;
 
-  // Process edges/links from API
-  if (apiData.edges) {
-    apiData.edges.forEach(edge => {
-      if (nodeMap.has(edge.source) && nodeMap.has(edge.target)) {
-        links.push({
-          source: edge.source,
-          target: edge.target,
-          type: edge.type || 'connected',
-          weight: edge.weight || 1
-        });
-      }
-    });
-  }
-
-  // If no data from API, generate sample data for demonstration
-  if (nodes.length === 0) {
-    return generateSampleGraph();
-  }
-
-  return { nodes, links };
-}
-
-function generateSampleGraph() {
-  // Generate sample graph for demonstration
-  const nodes = [
-    { id: 'root', label: 'example.com', type: 'domain', risk_score: 7.5 },
-    { id: 'sub1', label: 'www.example.com', type: 'subdomain', risk_score: 6.2 },
-    { id: 'sub2', label: 'api.example.com', type: 'subdomain', risk_score: 8.1 },
-    { id: 'sub3', label: 'admin.example.com', type: 'subdomain', risk_score: 9.2 },
-    { id: 'ip1', label: '192.168.1.100', type: 'ip', risk_score: 7.0 },
-    { id: 'ip2', label: '192.168.1.101', type: 'ip', risk_score: 8.5 },
-    { id: 'svc1', label: 'HTTP:80', type: 'service', risk_score: 5.0 },
-    { id: 'svc2', label: 'HTTPS:443', type: 'service', risk_score: 6.5 },
-    { id: 'svc3', label: 'SSH:22', type: 'service', risk_score: 7.8 },
-    { id: 'vuln1', label: 'CVE-2023-1234', type: 'vulnerability', risk_score: 9.8 },
-    { id: 'vuln2', label: 'CVE-2023-5678', type: 'vulnerability', risk_score: 8.2 },
-    { id: 'vuln3', label: 'Weak SSL/TLS', type: 'vulnerability', risk_score: 7.5 }
-  ];
-
-  const links = [
-    { source: 'root', target: 'sub1', type: 'subdomain_of', weight: 1 },
-    { source: 'root', target: 'sub2', type: 'subdomain_of', weight: 1 },
-    { source: 'root', target: 'sub3', type: 'subdomain_of', weight: 1 },
-    { source: 'sub1', target: 'ip1', type: 'resolves_to', weight: 1 },
-    { source: 'sub2', target: 'ip2', type: 'resolves_to', weight: 1 },
-    { source: 'sub3', target: 'ip2', type: 'resolves_to', weight: 1 },
-    { source: 'ip1', target: 'svc1', type: 'hosts', weight: 1 },
-    { source: 'ip1', target: 'svc2', type: 'hosts', weight: 1 },
-    { source: 'ip2', target: 'svc2', type: 'hosts', weight: 1 },
-    { source: 'ip2', target: 'svc3', type: 'hosts', weight: 1 },
-    { source: 'svc2', target: 'vuln1', type: 'has_vulnerability', weight: 2 },
-    { source: 'svc3', target: 'vuln2', type: 'has_vulnerability', weight: 2 },
-    { source: 'svc2', target: 'vuln3', type: 'has_vulnerability', weight: 1 }
-  ];
-
-  return { nodes, links };
-}
-
-// ============================================================================
-// FILTERING
-// ============================================================================
-function filterGraph() {
-  const nodeTypes = Array.from(document.getElementById('nodeTypeFilter').selectedOptions).map(o => o.value);
-  const riskLevels = Array.from(document.getElementById('riskFilter').selectedOptions).map(o => o.value);
-
-  // Filter nodes
-  state.filteredData.nodes = state.graphData.nodes.filter(node => {
-    // Type filter
-    if (!nodeTypes.includes(node.type)) return false;
-
-    // Risk filter
-    const risk = getRiskLevel(node.risk_score);
-    if (!riskLevels.includes(risk)) return false;
-
-    return true;
+  // Subdomain nodes
+  subdomains.forEach(sub => {
+    const host = typeof sub === 'string' ? sub : sub.subdomain || sub.host || sub.name;
+    if (!host) return;
+    const id = `sub:${host}`;
+    if (nodeMap[id]) return;
+    nodes.push({ id, label: host, type: 'subdomain', size: 14, data: sub });
+    nodeMap[id] = true;
+    links.push({ source: rootId, target: id, type: 'has_subdomain' });
   });
 
-  // Get filtered node IDs
-  const nodeIds = new Set(state.filteredData.nodes.map(n => n.id));
-
-  // Filter links (only keep links where both nodes are in filtered set)
-  state.filteredData.links = state.graphData.links.filter(link => {
-    const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
-    const targetId = typeof link.target === 'object' ? link.target.id : link.target;
-    return nodeIds.has(sourceId) && nodeIds.has(targetId);
+  // Port nodes (group by host)
+  const portsByHost = {};
+  ports.forEach(p => {
+    const host = p.host || p.ip || state.selectedTarget;
+    if (!portsByHost[host]) portsByHost[host] = [];
+    portsByHost[host].push(p);
   });
 
-  updateStats();
+  Object.entries(portsByHost).forEach(([host, hostPorts]) => {
+    const parentId = nodeMap[`sub:${host}`] ? `sub:${host}` : rootId;
+    hostPorts.forEach(p => {
+      const port = p.port || p.portid;
+      const id = `port:${host}:${port}`;
+      if (nodeMap[id]) return;
+      nodes.push({
+        id, label: `${port}/${p.protocol || 'tcp'}`,
+        type: 'port', size: 8,
+        data: { ...p, host, service: p.service || p.name || '' }
+      });
+      nodeMap[id] = true;
+      links.push({ source: parentId, target: id, type: 'open_port' });
+    });
+  });
+
+  // Finding nodes
+  let criticalCount = 0;
+  findings.forEach((f, i) => {
+    const severity = (f.severity || f.risk || 'info').toLowerCase();
+    const host = f.host || f.url || state.selectedTarget;
+    const id = `vuln:${i}:${f.name || 'finding'}`;
+
+    nodes.push({
+      id, label: f.name || f.title || `Finding ${i + 1}`,
+      type: 'finding', size: severity === 'critical' ? 16 : severity === 'high' ? 13 : 10,
+      severity, data: f
+    });
+    nodeMap[id] = true;
+
+    // Link to host if possible
+    const parentId = nodeMap[`sub:${host}`] ? `sub:${host}` : rootId;
+    links.push({ source: parentId, target: id, type: 'vulnerability' });
+
+    if (severity === 'critical') criticalCount++;
+  });
+
+  state.nodes = nodes;
+  state.links = links;
+  state.stats = {
+    nodes: nodes.length,
+    edges: links.length,
+    attackPaths: findings.filter(f => (f.severity || '').toLowerCase() === 'critical').length,
+    criticalAssets: criticalCount
+  };
+
+  renderStats();
   renderGraph();
 }
 
-function getRiskLevel(score) {
-  if (score >= 9) return 'critical';
-  if (score >= 7) return 'high';
-  if (score >= 4) return 'medium';
-  return 'low';
+// ─── D3 Graph ─────────────────────────────────────────────────────────────────
+function initGraph() {
+  const container = el('graphContainer');
+  if (!container) return;
+  const width = container.clientWidth;
+  const height = container.clientHeight || 600;
+
+  state.svg = d3.select('#graphContainer')
+    .append('svg')
+    .attr('width', '100%')
+    .attr('height', '100%')
+    .attr('viewBox', `0 0 ${width} ${height}`);
+
+  // Defs for arrow markers
+  const defs = state.svg.append('defs');
+  ['#3B82F6', '#06B6D4', '#F59E0B', '#EF4444'].forEach((color, i) => {
+    defs.append('marker')
+      .attr('id', `arrow-${i}`)
+      .attr('viewBox', '0 -5 10 10')
+      .attr('refX', 20)
+      .attr('refY', 0)
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-5L10,0L0,5')
+      .attr('fill', color);
+  });
+
+  state.g = state.svg.append('g');
+
+  state.zoom = d3.zoom()
+    .scaleExtent([0.1, 5])
+    .on('zoom', (event) => state.g.attr('transform', event.transform));
+  state.svg.call(state.zoom);
 }
 
-// ============================================================================
-// GRAPH RENDERING
-// ============================================================================
 function renderGraph() {
-  // Clear existing elements
+  if (!state.g) return;
   state.g.selectAll('*').remove();
 
-  if (state.filteredData.nodes.length === 0) {
-    showError('No nodes match the current filters');
-    return;
-  }
+  const container = el('graphContainer');
+  const width = container.clientWidth;
+  const height = container.clientHeight || 600;
 
-  // Create links
-  state.linkElements = state.g.append('g')
-    .attr('class', 'links')
+  const colorMap = {
+    target: '#F59E0B',
+    subdomain: '#3B82F6',
+    port: '#06B6D4',
+    finding: '#EF4444'
+  };
+
+  const findingColor = (d) => {
+    if (d.type !== 'finding') return colorMap[d.type] || '#6B7280';
+    const sev = d.severity || 'info';
+    return sev === 'critical' ? '#DC2626' : sev === 'high' ? '#F97316' :
+           sev === 'medium' ? '#F59E0B' : sev === 'low' ? '#3B82F6' : '#6B7280';
+  };
+
+  // Simulation
+  if (state.simulation) state.simulation.stop();
+
+  state.simulation = d3.forceSimulation(state.nodes)
+    .force('link', d3.forceLink(state.links).id(d => d.id).distance(80))
+    .force('charge', d3.forceManyBody().strength(-200))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collision', d3.forceCollide().radius(d => d.size + 5));
+
+  // Links
+  const link = state.g.append('g')
     .selectAll('line')
-    .data(state.filteredData.links)
-    .enter()
-    .append('line')
-    .attr('stroke', '#475569')
-    .attr('stroke-opacity', 0.6)
-    .attr('stroke-width', d => Math.sqrt(d.weight) * 2);
+    .data(state.links)
+    .join('line')
+    .attr('stroke', '#334155')
+    .attr('stroke-width', 1)
+    .attr('stroke-opacity', 0.6);
 
-  // Create nodes
-  state.nodeElements = state.g.append('g')
-    .attr('class', 'nodes')
-    .selectAll('circle')
-    .data(state.filteredData.nodes)
-    .enter()
-    .append('circle')
-    .attr('r', d => 10 + (d.risk_score / 10) * 10) // Size based on risk
-    .attr('fill', d => getNodeColor(d))
-    .attr('stroke', '#fff')
-    .attr('stroke-width', 2)
-    .style('cursor', 'pointer')
-    .call(drag(state.simulation))
-    .on('click', (event, d) => showNodeDetails(d))
-    .on('mouseover', (event, d) => highlightNode(d))
-    .on('mouseout', () => unhighlightNode());
+  // Nodes
+  const node = state.g.append('g')
+    .selectAll('g')
+    .data(state.nodes)
+    .join('g')
+    .attr('cursor', 'pointer')
+    .call(d3.drag()
+      .on('start', dragStarted)
+      .on('drag', dragged)
+      .on('end', dragEnded)
+    )
+    .on('click', (event, d) => selectNode(d));
 
-  // Create labels
-  state.labelElements = state.g.append('g')
-    .attr('class', 'labels')
-    .selectAll('text')
-    .data(state.filteredData.nodes)
-    .enter()
-    .append('text')
-    .text(d => d.label)
-    .attr('font-size', 10)
-    .attr('fill', '#CBD5E1')
-    .attr('text-anchor', 'middle')
-    .attr('dy', -15);
+  // Node circles
+  node.append('circle')
+    .attr('r', d => d.size)
+    .attr('fill', d => findingColor(d))
+    .attr('stroke', d => d3.color(findingColor(d)).brighter(0.5))
+    .attr('stroke-width', 1.5)
+    .attr('opacity', 0.9);
 
-  // Update simulation
-  state.simulation.nodes(state.filteredData.nodes);
-  state.simulation.force('link').links(state.filteredData.links);
-  state.simulation.alpha(1).restart();
+  // Node labels
+  node.append('text')
+    .text(d => truncate(d.label, 20))
+    .attr('x', d => d.size + 5)
+    .attr('y', 4)
+    .attr('fill', '#94A3B8')
+    .attr('font-size', d => d.type === 'target' ? '12px' : '9px')
+    .attr('font-family', 'monospace');
 
-  // Tick function
+  // Simulation tick
   state.simulation.on('tick', () => {
-    state.linkElements
+    link
       .attr('x1', d => d.source.x)
       .attr('y1', d => d.source.y)
       .attr('x2', d => d.target.x)
       .attr('y2', d => d.target.y);
-
-    state.nodeElements
-      .attr('cx', d => d.x)
-      .attr('cy', d => d.y);
-
-    state.labelElements
-      .attr('x', d => d.x)
-      .attr('y', d => d.y);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
   });
-}
 
-function getNodeColor(node) {
-  if (colors[node.type]) {
-    return colors[node.type];
+  // Clear empty state
+  if (state.nodes.length > 0) {
+    const empty = container.querySelector('.graph-empty');
+    if (empty) empty.style.display = 'none';
   }
-  
-  // Fallback to risk-based coloring
-  const risk = getRiskLevel(node.risk_score);
-  return riskColors[risk];
 }
 
-// ============================================================================
-// INTERACTIONS
-// ============================================================================
-function drag(simulation) {
-  function dragstarted(event, d) {
-    if (!event.active) simulation.alphaTarget(0.3).restart();
-    d.fx = d.x;
-    d.fy = d.y;
+function dragStarted(event, d) {
+  if (!event.active) state.simulation.alphaTarget(0.3).restart();
+  d.fx = d.x; d.fy = d.y;
+}
+
+function dragged(event, d) {
+  d.fx = event.x; d.fy = event.y;
+}
+
+function dragEnded(event, d) {
+  if (!event.active) state.simulation.alphaTarget(0);
+  d.fx = null; d.fy = null;
+}
+
+function selectNode(d) {
+  state.selectedNode = d;
+  renderNodePanel(d);
+}
+
+// ─── Node Detail Panel ────────────────────────────────────────────────────────
+function renderNodePanel(d) {
+  const panel = el('nodePanel');
+  if (!panel) return;
+
+  el('nodePanelTitle').textContent = d.label;
+
+  const propsDiv = el('nodePanelBody');
+  let html = '';
+
+  if (d.type === 'target') {
+    html = `<div class="prop-row"><span class="prop-key">Type</span><span class="prop-val">Target</span></div>
+            <div class="prop-row"><span class="prop-key">Domain</span><span class="prop-val">${esc(d.label)}</span></div>`;
+  } else if (d.type === 'subdomain') {
+    const data = d.data || {};
+    html = `
+      <div class="prop-row"><span class="prop-key">Host</span><span class="prop-val">${esc(d.label)}</span></div>
+      ${data.ip ? `<div class="prop-row"><span class="prop-key">IP</span><span class="prop-val">${esc(data.ip)}</span></div>` : ''}
+      ${data.alive !== undefined ? `<div class="prop-row"><span class="prop-key">Status</span><span class="prop-val">${data.alive ? 'Alive' : 'Down'}</span></div>` : ''}
+    `;
+  } else if (d.type === 'port') {
+    const data = d.data || {};
+    html = `
+      <div class="prop-row"><span class="prop-key">Port</span><span class="prop-val">${esc(d.label)}</span></div>
+      <div class="prop-row"><span class="prop-key">Host</span><span class="prop-val">${esc(data.host || '')}</span></div>
+      ${data.service ? `<div class="prop-row"><span class="prop-key">Service</span><span class="prop-val">${esc(data.service)}</span></div>` : ''}
+      ${data.version ? `<div class="prop-row"><span class="prop-key">Version</span><span class="prop-val">${esc(data.version)}</span></div>` : ''}
+    `;
+  } else if (d.type === 'finding') {
+    const data = d.data || {};
+    html = `
+      <div class="prop-row"><span class="prop-key">Severity</span><span class="prop-val"><span class="badge badge-${d.severity || 'info'}">${(d.severity || 'info').toUpperCase()}</span></span></div>
+      <div class="prop-row"><span class="prop-key">Name</span><span class="prop-val">${esc(data.name || data.title || '')}</span></div>
+      ${data.cve ? `<div class="prop-row"><span class="prop-key">CVE</span><span class="prop-val">${esc(data.cve)}</span></div>` : ''}
+      ${data.host ? `<div class="prop-row"><span class="prop-key">Host</span><span class="prop-val">${esc(data.host)}</span></div>` : ''}
+      ${data.tool ? `<div class="prop-row"><span class="prop-key">Tool</span><span class="prop-val">${esc(data.tool)}</span></div>` : ''}
+      ${data.description ? `<div class="prop-row"><span class="prop-key">Description</span><span class="prop-val" style="white-space:pre-wrap;font-size:0.75rem;">${esc(data.description)}</span></div>` : ''}
+    `;
   }
 
-  function dragged(event, d) {
-    d.fx = event.x;
-    d.fy = event.y;
-  }
-
-  function dragended(event, d) {
-    if (!event.active) simulation.alphaTarget(0);
-    d.fx = null;
-    d.fy = null;
-  }
-
-  return d3.drag()
-    .on('start', dragstarted)
-    .on('drag', dragged)
-    .on('end', dragended);
-}
-
-function highlightNode(node) {
-  // Dim all nodes and links
-  state.nodeElements.style('opacity', n => n === node ? 1 : 0.3);
-  state.linkElements.style('opacity', l => {
-    const source = l.source.id || l.source;
-    const target = l.target.id || l.target;
-    return (source === node.id || target === node.id) ? 1 : 0.1;
-  });
-}
-
-function unhighlightNode() {
-  state.nodeElements.style('opacity', 1);
-  state.linkElements.style('opacity', 0.6);
-}
-
-function showNodeDetails(node) {
-  state.selectedNode = node;
-  const panel = document.getElementById('nodeDetailsPanel');
-  const body = document.getElementById('nodeDetailsBody');
-
-  document.getElementById('nodeDetailsTitle').textContent = node.label;
-
-  const risk = getRiskLevel(node.risk_score);
-  
-  body.innerHTML = `
-    <div style="margin-bottom: var(--spacing-md);">
-      <span class="badge badge-${escapeHtml(risk)}">${escapeHtml(risk).toUpperCase()}</span>
-      <span class="badge badge-info">${escapeHtml(node.type).toUpperCase()}</span>
-    </div>
-
-    <div style="margin-bottom: var(--spacing-md);">
-      <div class="text-muted" style="font-size: 0.875rem;">Risk Score</div>
-      <div style="font-size: 2rem; font-weight: bold; color: ${riskColors[risk]};">
-        ${node.risk_score.toFixed(1)}
-      </div>
-    </div>
-
-    <div style="margin-bottom: var(--spacing-md);">
-      <h4 style="font-size: 0.875rem; margin-bottom: var(--spacing-sm);">Connections</h4>
-      <div>${getNodeConnections(node)}</div>
-    </div>
-
-    ${node.metadata ? `
-      <div style="margin-bottom: var(--spacing-md);">
-        <h4 style="font-size: 0.875rem; margin-bottom: var(--spacing-sm);">Metadata</h4>
-        <pre style="background: var(--bg-elevated); padding: var(--spacing-sm); border-radius: var(--radius-sm); font-size: 0.75rem; overflow-x: auto;">${escapeHtml(JSON.stringify(node.metadata, null, 2))}</pre>
-      </div>
-    ` : ''}
-
-    <div class="flex gap-2">
-      <button class="btn btn-primary btn-sm" onclick="analyzeNode()">Analyze</button>
-      <button class="btn btn-secondary btn-sm" onclick="findPathsFrom()">Find Paths</button>
-    </div>
-  `;
-
+  propsDiv.innerHTML = html;
   panel.classList.remove('hidden');
 }
 
-function getNodeConnections(node) {
-  const incoming = state.filteredData.links.filter(l => {
-    const target = l.target.id || l.target;
-    return target === node.id;
-  });
-
-  const outgoing = state.filteredData.links.filter(l => {
-    const source = l.source.id || l.source;
-    return source === node.id;
-  });
-
-  return `
-    <div class="text-muted" style="font-size: 0.875rem;">
-      Incoming: <strong>${incoming.length}</strong><br>
-      Outgoing: <strong>${outgoing.length}</strong><br>
-      Total: <strong>${incoming.length + outgoing.length}</strong>
-    </div>
-  `;
-}
-
-function closeNodeDetails() {
-  document.getElementById('nodeDetailsPanel').classList.add('hidden');
+function closeNodePanel() {
+  const panel = el('nodePanel');
+  if (panel) panel.classList.add('hidden');
   state.selectedNode = null;
 }
 
-// ============================================================================
-// ACTIONS
-// ============================================================================
-async function findAttackPaths() {
-  if (!state.currentScanId) {
-    alert('Please select a scan first');
-    return;
-  }
-
-  try {
-    const response = await fetch(`${API_V1}/intelligence/attack-paths/${state.currentScanId}`, {
-      headers: getHeaders()
-    });
-
-    if (!response.ok) throw new Error('Failed to find attack paths');
-
-    const data = await response.json();
-    state.attackPaths = data.paths || [];
-
-    document.getElementById('pathCount').textContent = state.attackPaths.length;
-    
-    if (state.attackPaths.length > 0) {
-      highlightAttackPaths();
-      alert(`Found ${state.attackPaths.length} potential attack path(s)`);
-    } else {
-      alert('No attack paths found');
-    }
-  } catch (error) {
-    console.error('Failed to find attack paths:', error);
-    alert('Failed to analyze attack paths');
+// ─── Zoom Controls ────────────────────────────────────────────────────────────
+function resetZoom() {
+  if (state.svg && state.zoom) {
+    state.svg.transition().duration(500).call(state.zoom.transform, d3.zoomIdentity);
   }
 }
 
-function highlightAttackPaths() {
-  if (!state.attackPaths || state.attackPaths.length === 0) return;
-
-  // Get all nodes in attack paths
-  const pathNodes = new Set();
-  state.attackPaths.forEach(path => {
-    path.forEach(nodeId => pathNodes.add(nodeId));
-  });
-
-  // Highlight nodes
-  state.nodeElements
-    .attr('stroke', d => pathNodes.has(d.id) ? '#EF4444' : '#fff')
-    .attr('stroke-width', d => pathNodes.has(d.id) ? 4 : 2);
-}
-
-function analyzeNode() {
-  if (!state.selectedNode) return;
-  alert(`Analyzing ${state.selectedNode.label}...\n\nThis would trigger deep analysis of the selected node.`);
-}
-
-function findPathsFrom() {
-  if (!state.selectedNode) return;
-  alert(`Finding paths from ${state.selectedNode.label}...\n\nThis would find all paths originating from this node.`);
-}
-
-function resetGraph() {
-  // Reset zoom
-  state.svg.transition().duration(750).call(
-    d3.zoom().transform,
-    d3.zoomIdentity
-  );
-
-  // Restart simulation
-  state.simulation.alpha(1).restart();
-}
-
-function exportGraph(format) {
-  if (format === 'json') {
-    const data = JSON.stringify(state.filteredData, null, 2);
-    downloadFile(data, `graph_${state.currentScanId}.json`, 'application/json');
-  } else if (format === 'svg') {
-    const svgData = state.svg.node().outerHTML;
-    downloadFile(svgData, `graph_${state.currentScanId}.svg`, 'image/svg+xml');
+function resizeGraph() {
+  const container = el('graphContainer');
+  if (!container || !state.svg) return;
+  const w = container.clientWidth;
+  const h = container.clientHeight || 600;
+  state.svg.attr('viewBox', `0 0 ${w} ${h}`);
+  if (state.simulation) {
+    state.simulation.force('center', d3.forceCenter(w / 2, h / 2));
+    state.simulation.alpha(0.3).restart();
   }
 }
 
-function downloadFile(content, filename, mimeType) {
-  const blob = new Blob([content], { type: mimeType });
+// ─── Export ───────────────────────────────────────────────────────────────────
+function exportSVG() {
+  if (!state.svg) return;
+  const svgEl = state.svg.node();
+  const serializer = new XMLSerializer();
+  const svgStr = serializer.serializeToString(svgEl);
+  const blob = new Blob([svgStr], { type: 'image/svg+xml' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename;
+  a.download = `reconx-graph-${state.selectedTarget || 'export'}.svg`;
   a.click();
   URL.revokeObjectURL(url);
+  toast('Graph exported as SVG', 'success');
 }
 
-// ============================================================================
-// TOGGLES
-// ============================================================================
-function toggleLabels() {
-  const show = document.getElementById('showLabels').checked;
-  state.labelElements?.style('display', show ? 'block' : 'none');
+// ─── UI Helpers ───────────────────────────────────────────────────────────────
+function renderTargetSelect() {
+  const select = el('targetSelect');
+  if (!select) return;
+  select.innerHTML = '<option value="">Select target...</option>' +
+    state.targets.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
 }
 
-function toggleEdges() {
-  const show = document.getElementById('showEdges').checked;
-  state.linkElements?.style('display', show ? 'block' : 'none');
+function renderStats() {
+  animateNum('nodeCount', state.stats.nodes);
+  animateNum('edgeCount', state.stats.edges);
+  animateNum('pathCount', state.stats.attackPaths);
+  animateNum('criticalAssets', state.stats.criticalAssets);
 }
 
-function togglePathHighlight() {
-  const highlight = document.getElementById('highlightPaths').checked;
-  if (highlight && state.attackPaths.length > 0) {
-    highlightAttackPaths();
-  } else {
-    state.nodeElements?.attr('stroke', '#fff').attr('stroke-width', 2);
+function showLoading(show) {
+  const container = el('graphContainer');
+  if (!container) return;
+  let loader = container.querySelector('.graph-loading');
+  if (show) {
+    if (!loader) {
+      loader = document.createElement('div');
+      loader.className = 'graph-loading';
+      loader.innerHTML = '<span class="spinner"></span> Loading graph data...';
+      loader.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text-secondary);display:flex;align-items:center;gap:8px;';
+      container.style.position = 'relative';
+      container.appendChild(loader);
+    }
+  } else if (loader) {
+    loader.remove();
   }
 }
 
-// ============================================================================
-// STATS
-// ============================================================================
-function updateStats() {
-  document.getElementById('nodeCount').textContent = state.filteredData.nodes.length;
-  document.getElementById('edgeCount').textContent = state.filteredData.links.length;
-  
-  const criticalNodes = state.filteredData.nodes.filter(n => n.risk_score >= 9).length;
-  document.getElementById('criticalAssets').textContent = criticalNodes;
+function showEmptyState(msg) {
+  const container = el('graphContainer');
+  if (!container) return;
+  const empty = container.querySelector('.graph-empty') || document.createElement('div');
+  empty.className = 'graph-empty';
+  empty.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text-secondary);text-align:center;';
+  empty.innerHTML = `<p>${msg}</p>`;
+  if (!container.contains(empty)) container.appendChild(empty);
 }
 
-// ============================================================================
-// UI HELPERS
-// ============================================================================
-function showLoading() {
-  const container = document.getElementById('graphContainer');
-  container.innerHTML = '<div class="empty-state" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);"><div class="spinner"></div><p>Loading graph...</p></div>';
-  initializeSVG();
-}
-
-function hideLoading() {
-  // Loading automatically cleared when SVG is rendered
-}
-
-function showError(message) {
-  const container = document.getElementById('graphContainer');
-  const emptyState = container.querySelector('.empty-state');
-  if (emptyState) {
-    emptyState.innerHTML = `<p class="text-danger">${escapeHtml(message)}</p>`;
+// ─── Attack Paths ──────────────────────────────────────────────────────────────
+function findAttackPaths() {
+  if (!state.nodes || state.nodes.length === 0) {
+    toast('Load a graph first before finding attack paths', 'warning');
+    return;
   }
+  // Highlight critical/high severity finding nodes and their connections
+  const criticalNodes = state.nodes.filter(n => n.type === 'finding' && (n.severity === 'critical' || n.severity === 'high'));
+  if (criticalNodes.length === 0) {
+    toast('No critical or high severity findings found', 'info');
+    return;
+  }
+  const criticalIds = new Set(criticalNodes.map(n => n.id));
+  // Find all links that connect to critical nodes
+  const pathLinks = state.links.filter(l => {
+    const src = typeof l.source === 'string' ? l.source : l.source.id;
+    const tgt = typeof l.target === 'string' ? l.target : l.target.id;
+    return criticalIds.has(src) || criticalIds.has(tgt);
+  });
+  const pathNodeIds = new Set();
+  pathLinks.forEach(l => {
+    pathNodeIds.add(typeof l.source === 'string' ? l.source : l.source.id);
+    pathNodeIds.add(typeof l.target === 'string' ? l.target : l.target.id);
+  });
+
+  // Visual highlight
+  if (state.svg) {
+    state.svg.selectAll('.link').attr('opacity', l => {
+      const src = typeof l.source === 'string' ? l.source : l.source.id;
+      const tgt = typeof l.target === 'string' ? l.target : l.target.id;
+      return (criticalIds.has(src) || criticalIds.has(tgt)) ? 1 : 0.1;
+    });
+    state.svg.selectAll('.node').attr('opacity', d => pathNodeIds.has(d.id) ? 1 : 0.15);
+  }
+
+  toast(`Found ${criticalNodes.length} attack path(s) through ${pathNodeIds.size} nodes`, 'success');
 }
 
-// ============================================================================
-// UTILITIES
-// ============================================================================
-function getHeaders() {
-  const apiKey = localStorage.getItem('reconx_api_key') || 'demo_key';
-  return {
-    'X-API-Key': apiKey
-  };
+// ─── Utilities ────────────────────────────────────────────────────────────────
+function el(id) { return document.getElementById(id); }
+function hdrs() { return { 'X-API-Key': localStorage.getItem('reconx_api_key') || 'demo_key' }; }
+
+async function apiGet(path) {
+  const res = await fetch(`${API}${path}`, { headers: hdrs() });
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  return res.json();
+}
+
+function esc(text) {
+  const d = document.createElement('div');
+  d.textContent = text || '';
+  return d.innerHTML;
+}
+
+function truncate(str, len) {
+  return (str || '').length > len ? str.slice(0, len) + '...' : (str || '');
+}
+
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+function animateNum(id, target) {
+  const e = el(id);
+  if (!e) return;
+  const start = parseInt(e.textContent) || 0;
+  if (start === target) return;
+  const t0 = performance.now();
+  (function tick(now) {
+    const p = Math.min((now - t0) / 400, 1);
+    e.textContent = Math.floor(start + (target - start) * p * (2 - p));
+    if (p < 1) requestAnimationFrame(tick);
+  })(performance.now());
+}
+
+function toast(msg, type = 'info') {
+  const c = el('toastContainer');
+  if (!c) return;
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+function initSidebar() {
+  const toggle = el('sidebarToggle');
+  const sidebar = el('sidebar');
+  const overlay = el('sidebarOverlay');
+  if (toggle && sidebar) {
+    toggle.addEventListener('click', () => {
+      sidebar.classList.toggle('open');
+      overlay?.classList.toggle('open');
+    });
+  }
+  if (overlay) overlay.addEventListener('click', () => {
+    sidebar?.classList.remove('open');
+    overlay.classList.remove('open');
+  });
 }

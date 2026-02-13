@@ -1,76 +1,104 @@
 """
-ReconX API Server
-Serves REST API and static web UI.
+ReconX API Server v2.0
+Serves REST API and static web UI with FireCompass-style dashboard.
 Run from project root: uvicorn api.server:app --host 0.0.0.0 --port 8000
 """
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 # Project root (parent of api/)
 ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = ROOT / "web" / "static"
+ASSETS_DIR = STATIC_DIR / "assets"
 
 app = FastAPI(
-    title="ReconX API",
+    title="ReconX Enterprise API",
     version="2.0",
-    description="Attack Surface Management API",
+    description="Attack Surface Management Platform",
 )
 
-# Mount API routes
-from api.routes import scans, assets, findings, stream
+# CORS — allow dashboard on same origin + dev servers
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ─── API Routes ────────────────────────────────────────────────────────────────
+from api.routes import scans, assets, findings, stream  # noqa: E402
+
 app.include_router(scans.router, prefix="/api/v1")
 app.include_router(assets.router, prefix="/api/v1")
 app.include_router(findings.router, prefix="/api/v1")
 app.include_router(stream.router, prefix="/api/v1")
 
 
-# Mount static files (JS, CSS, assets)
-if STATIC_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+# ─── Health ────────────────────────────────────────────────────────────────────
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "service": "reconx-api", "version": "2.0"}
 
 
-@app.get("/")
-async def index():
-    """Serve dashboard."""
-    index_file = STATIC_DIR / "index.html"
-    if index_file.exists():
-        return FileResponse(index_file)
+# ─── Page Routes ───────────────────────────────────────────────────────────────
+def _serve(filename: str):
+    """Return an HTML page or JSON fallback."""
+    p = STATIC_DIR / filename
+    if p.exists():
+        return FileResponse(p, media_type="text/html")
     return {"message": "ReconX API", "docs": "/docs"}
 
 
+@app.get("/")
+@app.get("/dashboard")
+async def page_dashboard():
+    return _serve("index.html")
+
+
+@app.get("/assessments")
+async def page_assessments():
+    return _serve("scan_viewer_v2.html")
+
+
+@app.get("/vulnerabilities")
+async def page_vulnerabilities():
+    return _serve("findings_v2.html")
+
+
+@app.get("/graph")
+async def page_graph():
+    return _serve("graph_viewer_v2.html")
+
+
+# Legacy routes (v1 pages still in web/static/)
 @app.get("/scan_viewer.html")
-async def scan_viewer():
-    p = STATIC_DIR / "scan_viewer.html"
-    if p.exists():
-        return FileResponse(p)
-    raise HTTPException(status_code=404, detail="Not found")
+async def legacy_scan_viewer():
+    return _serve("scan_viewer.html")
 
 
 @app.get("/findings.html")
-async def findings_page():
-    p = STATIC_DIR / "findings.html"
-    if p.exists():
-        return FileResponse(p)
-    raise HTTPException(status_code=404, detail="Not found")
+async def legacy_findings():
+    return _serve("findings.html")
 
 
 @app.get("/graph_viewer.html")
-async def graph_viewer():
-    p = STATIC_DIR / "graph_viewer.html"
-    if p.exists():
-        return FileResponse(p)
-    raise HTTPException(status_code=404, detail="Not found")
+async def legacy_graph_viewer():
+    return _serve("graph_viewer.html")
 
 
-@app.get("/api/health")
-async def health():
-    return {"status": "ok", "service": "reconx-api"}
+# ─── Static Assets (CSS, JS, images) ──────────────────────────────────────────
+# IMPORTANT: must be mounted AFTER explicit routes so /assets/* doesn't shadow them
+if ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
