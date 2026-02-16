@@ -38,16 +38,16 @@ class ThreatCorrelator:
         for vuln in vulnerabilities:
             correlation = {
                 "vulnerability_id": vuln.id,
-                "cve_id": vuln.cve_id,
+                "cve_ids": vuln.cve_ids,
                 "threat_intel": [],
                 "active_exploits": [],
                 "malware_indicators": []
             }
             
             # Find threat intel by CVE
-            if vuln.cve_id:
+            if vuln.cve_ids:
                 threat_intel = self.db.query(ThreatIntelData).filter(
-                    ThreatIntelData.indicator_value.contains(vuln.cve_id)
+                    ThreatIntelData.indicator_value.contains(vuln.cve_ids)
                 ).all()
                 
                 if threat_intel:

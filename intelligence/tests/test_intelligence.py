@@ -62,9 +62,9 @@ class TestThreatCorrelation:
         """Test correlating vulnerabilities with threat intel."""
         # Create test scan
         scan = ScanRun(
-            target="test.com",
+            domain="test.com",
+            scan_type="quick",
             status="completed",
-            started_at=datetime.now(timezone.utc)
         )
         db_session.add(scan)
         db_session.commit()
@@ -73,9 +73,10 @@ class TestThreatCorrelation:
         vuln = Vulnerability(
             scan_run_id=scan.id,
             title="SQL Injection",
-            cve_id="CVE-2023-1234",
+            vuln_type="injection",
+            cve_ids="CVE-2023-1234",
             severity=90,
-            discovered_at=datetime.now(timezone.utc)
+            discovered_at=datetime.now(timezone.utc),
         )
         db_session.add(vuln)
         db_session.commit()
