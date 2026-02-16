@@ -62,6 +62,8 @@ def fresh_db():
     # Re-apply per-test: prevents cross-module import order from overwriting these.
     _db_module.SessionLocal = Session
     app.dependency_overrides[get_db] = override_get_db
+    _worker._engine = engine
+    _worker._Session = Session
     Base.metadata.create_all(bind=engine)
     # Ensure new tables exist (test DB might predate migrations)
     with engine.begin() as conn:

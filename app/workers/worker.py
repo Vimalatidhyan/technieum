@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./reconx.db")
 WORKER_POLL_SEC = int(os.environ.get("WORKER_POLL_SEC", "5"))
+WORKER_MAX_JOBS = int(os.environ.get("WORKER_MAX_JOBS", "4"))  # max concurrent jobs per worker process
 
 # Unique identifier for this worker process instance
 _WORKER_ID = f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
@@ -218,6 +219,20 @@ def _run_scan(scan_run_id: int, db: Session) -> tuple[bool, str]:
         )
 
         for raw_line in proc.stdout:
+            # Check if scan was stopped via API while running
+            current = db.execute(
+                text("SELECT status FROM scan_runs WHERE id=:id"),
+                {"id": scan_run_id},
+            ).fetchone()
+            if current and current[0] in ("stopped", "failed"):
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                return False, f"scan {current[0]} by request"
+
             line = raw_line.rstrip()
             if not line:
                 continue
@@ -272,7 +287,7 @@ def run_once(db: Optional[Session] = None) -> int:
 
     processed = 0
     try:
-        while True:
+        while processed < WORKER_MAX_JOBS:
             job = _claim_job(db)
             if job is None:
                 break
@@ -296,8 +311,14 @@ def run_once(db: Optional[Session] = None) -> int:
                 )
 
             _finish_job(db, job, success, error)
-            final_status = "completed" if success else "failed"
-            _set_scan_status(db, scan_run_id, final_status)
+            # Do not overwrite a stopped status that was set via /stop endpoint
+            current_status_row = db.execute(
+                text("SELECT status FROM scan_runs WHERE id=:id"),
+                {"id": scan_run_id},
+            ).fetchone()
+            if current_status_row and current_status_row[0] not in ("stopped",):
+                final_status = "completed" if success else "failed"
+                _set_scan_status(db, scan_run_id, final_status)
 
             if not success:
                 _emit_event(db, scan_run_id, "error", "error",
