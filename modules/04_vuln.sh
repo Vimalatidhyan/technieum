@@ -97,9 +97,15 @@ mkdir -p "$NUCLEI_DIR"
 if command -v nuclei &> /dev/null && [ "$SCAN_COUNT" -gt 0 ]; then
     log_info "Running Nuclei with all templates..."
 
-    # Update Nuclei templates
-    log_info "Updating Nuclei templates..."
-    run_with_timeout "$TIMEOUT_DEFAULT" "nuclei -update-templates" || log_warn "Failed to update Nuclei templates"
+    # Update Nuclei templates only when RECONX_NUCLEI_UPDATE=true (opt-in).
+    # Skipping the update avoids the network call and speeds up every run.
+    RECONX_NUCLEI_UPDATE="${RECONX_NUCLEI_UPDATE:-false}"
+    if [ "$RECONX_NUCLEI_UPDATE" = "true" ]; then
+        log_info "Updating Nuclei templates (RECONX_NUCLEI_UPDATE=true)..."
+        run_with_timeout "$TIMEOUT_DEFAULT" "nuclei -update-templates" || log_warn "Failed to update Nuclei templates"
+    else
+        log_info "Skipping Nuclei template update (set RECONX_NUCLEI_UPDATE=true to enable)"
+    fi
 
     # Single consolidated Nuclei run covering all severities and CVE/misconfiguration tags.
     # One pass is faster than five sequential passes over the same URL list because Nuclei

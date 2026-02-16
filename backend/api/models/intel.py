@@ -1,13 +1,2 @@
-"""Threat intel Pydantic schemas."""
-from pydantic import BaseModel
-from datetime import datetime
-from typing import Optional
-
-class ThreatIntelResponse(BaseModel):
-    id: int
-    indicator_type: str
-    indicator_value: str
-    severity: Optional[int] = None
-    source: str
-    last_updated: datetime
-    model_config = {"from_attributes": True}
+"""Compatibility shim — canonical implementation is in app.api.models.intel."""
+from app.api.models.intel import *  # noqa: F401, F403

@@ -86,13 +86,24 @@ run_timeout() {
         gtimeout "$t" "$@"
         return $?
     fi
-    # Fallback when timeout not installed (e.g. macOS): run in background, sleep, kill
+    # Fallback: run in background, poll until done or timeout expires, then kill.
+    # Returns the real exit code if the command finishes early, or 124 on timeout.
     "$@" &
     local pid=$!
-    sleep "$t" 2>/dev/null
-    kill "$pid" 2>/dev/null
+    local elapsed=0
+    while [ "$elapsed" -lt "$t" ]; do
+        # If process has already exited, harvest its exit code immediately.
+        if ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid"
+            return $?
+        fi
+        sleep 1
+        elapsed=$(( elapsed + 1 ))
+    done
+    # Timeout reached — kill the process and return 124 (same as GNU timeout).
+    kill -- "$pid" 2>/dev/null
     wait "$pid" 2>/dev/null
-    return 0
+    return 124
 }
 
 export -f log_info

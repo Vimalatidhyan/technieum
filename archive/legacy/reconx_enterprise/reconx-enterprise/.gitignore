@@ -1,0 +1,164 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.pydevproject
+.settings/
+
+# Testing & Coverage
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+*.cover
+*.py,cover
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+test.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Node
+node_modules/
+.npm
+.eslintcache
+dist/
+build/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+*.icloud
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE specific
+.vscode/settings.json
+.idea/misc.xml
+.idea/modules.xml
+.idea/encodings.xml
+
+# Security
+*.pem
+*.key
+*.cert
+private_keys/
+
+# Build artifacts
+*.o
+*.so
+*.pyc
+dist/
+*.egg-info/
+
+# Docker
+.dockerignore
+
+# Cache
+.cache/
+*.cache
+tmp/
+temp/
+
+# Reports
+security-report.json
+bandit-report.json
+coverage.xml
+
+# Migration backups
+*.bak
+*.backup
+
+# API keys and secrets (never commit these!)
+*.secret
+*.credentials
+api_keys.yaml
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# IDE Pycharm
+.idea/*
+*.iml
+
+# VS Code
+.vscode/*
+
+# macOS
+.vscode/
+
+# Any environment-specific files
+local_settings.py
+instance/
+
+# External packages
+/external/
+
+# Temporary files
+.tmp/
+*.tmp

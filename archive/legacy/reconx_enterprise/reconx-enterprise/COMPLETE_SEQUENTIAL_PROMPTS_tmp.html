@@ -1,0 +1,3587 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>COMPLETE_SEQUENTIAL_PROMPTS.md</title>
+    <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+    
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+html,footer,header{
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Custom MD PDF CSS
+ */
+html,footer,header{
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+
+ }
+body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+<link rel="stylesheet" href="file:///Users/rejenthompson/Documents/technieum-/kali-linux-asm/R%3A%5C2.Travail%5C1.Enseignement%5CCours%5C_1.Outils%5C2.Developpement%5C1.SCSS%5Cmain.css" type="text/css"><link rel="stylesheet" href="file:///Users/rejenthompson/Documents/technieum-/kali-linux-asm/D%3A%5Crdaros%5CCours%5C_1.Outils%5C2.Developpement%5C1.SCSS%5Cmain.css" type="text/css">
+</head>
+
+<body>
+    <h1 id="%F0%9F%8E%AF-complete-sequential-prompts---reconx-enterprise-v20">🎯 Complete Sequential Prompts - ReconX Enterprise v2.0</h1>
+<h2 id="single-agent-execution---all-prompts-in-order-weeks-1-16">Single Agent Execution - All Prompts in Order (Weeks 1-16)</h2>
+<p><strong>Format:</strong> One agent (Claude), sequential execution, 15-20 minutes per prompt, atomic tasks</p>
+<p><strong>Reading this file:</strong> Follow each prompt IN ORDER. Each prompt builds on previous ones.</p>
+<hr>
+<h2 id="%F0%9F%9A%80-quick-start---read-first">🚀 Quick Start - READ FIRST</h2>
+<p><strong>If you're new to this system:</strong></p>
+<ol>
+<li>
+<p><strong><a href="claude.md">claude.md</a></strong> - Essential guides for using Claude effectively</p>
+<ul>
+<li>System message to paste once at the start</li>
+<li>How to provide context for dependencies</li>
+<li>Workflow: Claude → File → Verify</li>
+</ul>
+</li>
+<li>
+<p><strong><a href="restrictions.md">restrictions.md</a></strong> - Hard constraints Claude MUST follow</p>
+<ul>
+<li>100% type hints required</li>
+<li>90%+ test coverage</li>
+<li>Google-style docstrings</li>
+<li>All quality gates (mypy, black, flake8, isort)</li>
+</ul>
+</li>
+<li>
+<p><strong><a href="error-recovery.md">error-recovery.md</a></strong> - When code generation fails</p>
+<ul>
+<li>Type hint errors (mypy fixes)</li>
+<li>Test failures (pytest debugging)</li>
+<li>Code quality violations (auto-fixes)</li>
+<li>Runtime errors (integration fixes)</li>
+</ul>
+</li>
+<li>
+<p><strong><a href="verification-checklist.md">verification-checklist.md</a></strong> - Quality verification steps</p>
+<ul>
+<li>Run after each generated file</li>
+<li>Type hints checklist</li>
+<li>Test coverage requirements</li>
+<li>Integration test validation</li>
+</ul>
+</li>
+<li>
+<p><strong><a href="context-management.md">context-management.md</a></strong> - Managing multi-prompt workflow</p>
+<ul>
+<li>How to include context for dependencies</li>
+<li>When to share existing code</li>
+<li>Context window management</li>
+<li>Examples for different prompt types</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h2 id="%F0%9F%93%8B-table-of-contents">📋 Table of Contents</h2>
+<ul>
+<li><a href="#week-1-2-foundation">Week 1-2: Foundation Review</a></li>
+<li><a href="#week-3-4-database">Week 3-4: Database Models</a></li>
+<li><a href="#week-5-6-orchestrator">Week 5-6: Backend Orchestrator</a></li>
+<li><a href="#week-7-8-intelligence-1">Week 7-8: Intelligence Modules (Part 1)</a></li>
+<li><a href="#week-9-10-intelligence-2">Week 9-10: Intelligence Modules (Part 2)</a></li>
+<li><a href="#week-11-12-api">Week 11-12: API Server</a></li>
+<li><a href="#week-13-14-frontend">Week 13-14: Frontend</a></li>
+<li><a href="#week-15-16-testing">Week 15-16: Testing &amp; Deployment</a></li>
+</ul>
+<hr>
+<h2 id="%F0%9F%8E%AF-workflow-summary">🎯 Workflow Summary</h2>
+<p>For each prompt:</p>
+<ol>
+<li><strong>Open <a href="claude.md">claude.md</a> Section &quot;System Message&quot;</strong> - Copy system message (once at start)</li>
+<li><strong>Find your prompt below</strong> (currently at PROMPT X.Y)</li>
+<li><strong>Copy entire prompt text</strong> - Everything in the code block</li>
+<li><strong>Paste to Claude</strong> with system message on first prompt</li>
+<li><strong>Get generated code</strong> from Claude response</li>
+<li><strong>Save to correct file</strong> (path given in prompt)</li>
+<li><strong>Run <a href="verification-checklist.md">verification-checklist.md</a> steps</strong> to verify quality</li>
+<li><strong>On failure:</strong> See <a href="error-recovery.md">error-recovery.md</a></li>
+<li><strong>On success:</strong> Move to next prompt</li>
+<li><strong>For dependencies:</strong> See <a href="context-management.md">context-management.md</a></li>
+</ol>
+<hr>
+<hr>
+<p><a name="week-1-2-foundation"></a></p>
+<h1 id="week-1-2-foundation-review">WEEK 1-2: Foundation Review</h1>
+<h2 id="already-complete---verify-everything-works">Already Complete - Verify Everything Works</h2>
+<h3 id="prompt-11-verify-docker-environment-%E2%9C%85">PROMPT 1.1: Verify Docker Environment ✅</h3>
+<p><strong>Type:</strong> Verification (not code generation)<br>
+<strong>Expected Time:</strong> 5 minutes</p>
+<pre class="hljs"><code><div>TASK: Verify the Docker Compose development environment is working
+
+DO THIS:
+1. Navigate to reconx-enterprise folder
+2. Run: docker-compose ps
+3. Verify: All 8 services show &quot;Up&quot; status
+4. Run: docker-compose logs api | head -20
+5. Confirm: API service started successfully
+6. Run: python -c &quot;import sys; print(f'Python {sys.version}')&quot;
+7. Run: docker-compose exec api python -c &quot;from sqlalchemy import __version__; print(f'SQLAlchemy {__version__}')&quot;
+
+SUCCESS CRITERIA:
+✅ All 8 containers running
+✅ API service healthy
+✅ Python 3.10+
+✅ SQLAlchemy imported successfully
+
+TROUBLESHOOTING:
+If containers not running: docker-compose up -d
+If port conflicts: docker-compose down &amp;&amp; docker-compose up -d
+</div></code></pre>
+<h3 id="prompt-12-verify-project-structure-%E2%9C%85">PROMPT 1.2: Verify Project Structure ✅</h3>
+<p><strong>Type:</strong> Verification<br>
+<strong>Expected Time:</strong> 5 minutes</p>
+<pre class="hljs"><code><div>TASK: Verify project folder structure is complete
+
+DO THIS:
+1. Check main folders exist:
+   ls -la backend/ scanner/ frontend/ deployment/ docs/ prompts-design/
+
+2. Check Makefile has all commands:
+   make help
+   Verify: at least 20 targets listed
+
+3. Check GitHub Actions workflow:
+   cat .github/workflows/ci.yml
+   Verify: Testing, linting, security scanning configured
+
+4. Check requirements.txt:
+   wc -l requirements.txt
+   Should be ~87 packages
+
+SUCCESS CRITERIA:
+✅ All folders present
+✅ Makefile functional (20+ commands)
+✅ CI/CD pipeline configured
+✅ Python dependencies listed
+</div></code></pre>
+<h3 id="prompt-13-review-code-standards-%E2%9C%85">PROMPT 1.3: Review Code Standards ✅</h3>
+<p><strong>Type:</strong> Documentation Review<br>
+<strong>Expected Time:</strong> 10 minutes</p>
+<pre class="hljs"><code><div>TASK: Review and understand code quality standards
+
+DO THIS:
+1. Read the code standards:
+   cat prompts-design/SYSTEM_PROMPTS.md
+   
+2. Key sections to understand:
+   - Section 1: Code Quality Requirements (type hints, PEP 8)
+   - Section 4: Testing with pytest
+   - Section 6: File Organization
+
+3. Run quality checks on empty repo:
+   make lint
+   make type-check
+   make test
+
+SUCCESS CRITERIA:
+✅ Understand type hints required (100%)
+✅ Docstrings required on public functions
+✅ Tests required (85%+ coverage)
+✅ All quality commands work
+</div></code></pre>
+<hr>
+<p><a name="week-3-4-database"></a></p>
+<h1 id="week-3-4-database-models-25-models">WEEK 3-4: Database Models (25 Models)</h1>
+<h2 id="core-data-layer">Core Data Layer</h2>
+<h3 id="prompt-31-create-scanrun-model">PROMPT 3.1: Create ScanRun Model</h3>
+<p><strong>Type:</strong> Code Generation (Database Model)<br>
+<strong>Expected Time:</strong> 15 minutes<br>
+<strong>File:</strong> backend/db/models.py (create new)</p>
+<pre class="hljs"><code><div>[SYSTEM_PROMPTS PREAMBLE]
+
+You are writing production-grade Python code following:
+- PEP 8 style with black formatting (88 char lines)
+- Type hints on ALL functions and parameters
+- Google-style docstrings with Args/Returns/Raises
+- SQLAlchemy ORM models with relationships
+
+TASK: Create the ScanRun model in a new file
+
+FILE LOCATION: backend/db/models.py
+
+REQUIREMENTS:
+Create the ScanRun class that represents a single domain scanning operation.
+
+Model Definition:
+- Inherits from Base
+- Table name: &quot;scan_runs&quot;
+- Primary key: id (Integer, auto-increment)
+- Fields:
+  * domain (String 255, not null, indexed)
+  * scan_type (String 50, default &quot;full&quot;)
+  * status (String 50, default &quot;pending&quot;)
+  * created_at (DateTime, default=datetime.utcnow)
+  * completed_at (DateTime, nullable)
+
+Relationships:
+- Define back_populates with Subdomain (one-to-many)
+- Define back_populates with DNSRecord (one-to-many)
+- Define back_populates with ComplianceReport (one-to-one)
+
+Methods:
+- __repr__() returns &quot;&lt;ScanRun(id=..., domain=..., status=...)&gt;&quot;
+- duration_seconds property that returns int or None
+
+Include:
+- Complete docstring explaining the model's purpose
+- Type hints on all fields
+- Proper indexes on important fields
+
+DO NOT INCLUDE:
+- Don't create other models yet (just ScanRun)
+- Don't create migration files
+- Don't create tests (we'll do that separately)
+
+EXAMPLE STRUCTURE:
+from datetime import datetime
+from typing import Optional
+from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy.orm import relationship
+from backend.db.base import Base
+
+class ScanRun(Base):
+    &quot;&quot;&quot;Represents a single domain scanning operation.&quot;&quot;&quot;
+    __tablename__ = &quot;scan_runs&quot;
+    
+    id = Column(Integer, primary_key=True)
+    domain = Column(String(255), nullable=False, index=True)
+    # ... rest of fields
+    
+    subdomains = relationship(&quot;Subdomain&quot;, back_populates=&quot;scan_run&quot;)
+    # ... rest of relationships
+    
+    def __repr__(self) -&gt; str:
+        return f&quot;&lt;ScanRun(id={self.id}, domain={self.domain}, status={self.status})&gt;&quot;
+
+COMPLETION CHECKLIST:
+✅ File created: backend/db/models.py
+✅ ScanRun class defined with all fields
+✅ All fields have type hints
+✅ Relationships defined with back_populates
+✅ __repr__() method present
+✅ Docstring complete (5+ sentences)
+✅ Index on domain field
+✅ Duration property working
+
+VERIFICATION:
+After you generate this, I will run:
+python -c &quot;from backend.db.models import ScanRun; print('OK')&quot;
+mypy backend/db/models.py
+</div></code></pre>
+<p><strong>After Prompt 3.1:</strong></p>
+<pre class="hljs"><code><div><span class="hljs-comment"># Copy generated code to backend/db/models.py</span>
+<span class="hljs-comment"># Then verify:</span>
+python -c <span class="hljs-string">"from backend.db.models import ScanRun; print('ScanRun imported OK')"</span>
+mypy backend/db/models.py
+<span class="hljs-comment"># Should show: Success: no issues found</span>
+</div></code></pre>
+<hr>
+<h3 id="prompt-32-create-subdomain-portscan-vulnerability-models">PROMPT 3.2: Create Subdomain, PortScan, Vulnerability Models</h3>
+<p><strong>Type:</strong> Code Generation (Add to models.py)<br>
+<strong>Expected Time:</strong> 15 minutes<br>
+<strong>File:</strong> backend/db/models.py (append)</p>
+<pre class="hljs"><code><div>[SYSTEM_PROMPTS PREAMBLE]
+
+TASK: Add three more core models to backend/db/models.py
+
+ADD TO EXISTING FILE: backend/db/models.py
+
+The file already has ScanRun. Now add these three models:
+
+1. SUBDOMAIN MODEL
+   - Table: &quot;subdomains&quot;
+   - Primary key: id
+   - Fields:
+     * scan_run_id (Foreign key to scan_runs.id)
+     * subdomain (String 255, not null)
+     * is_alive (Boolean, default False)
+     * discovered_method (String 50, e.g. &quot;passive&quot;, &quot;active&quot;, &quot;crawl&quot;)
+     * first_seen (DateTime)
+     * last_seen (DateTime)
+   - Relationships:
+     * scan_run (many-to-one back to ScanRun)
+     * ports (one-to-many to PortScan - define this)
+     * vulnerabilities (one-to-many to Vulnerability)
+   - Index: create index on (scan_run_id, subdomain)
+
+2. PORTSCAN MODEL
+   - Table: &quot;port_scans&quot;
+   - Primary key: id
+   - Fields:
+     * subdomain_id (Foreign key to subdomains.id)
+     * port (Integer, required)
+     * protocol (String 10, &quot;tcp&quot; or &quot;udp&quot;)
+     * state (String 50, e.g. &quot;open&quot;, &quot;closed&quot;, &quot;filtered&quot;)
+     * service (String 50, nullable, e.g. &quot;HTTP&quot;, &quot;SSH&quot;)
+     * version (String 255, nullable)
+   - Relationships:
+     * subdomain (many-to-one back to Subdomain)
+     * vulnerabilities (one-to-many to Vulnerability)
+   - Index: on (subdomain_id, port, protocol)
+
+3. VULNERABILITY MODEL
+   - Table: &quot;vulnerabilities&quot;
+   - Primary key: id
+   - Fields:
+     * scan_run_id (Foreign key to scan_runs.id)
+     * subdomain_id (Foreign key to subdomains.id, nullable)
+     * port_scan_id (Foreign key to port_scans.id, nullable)
+     * vuln_type (String 50, e.g. &quot;xss&quot;, &quot;sqli&quot;, &quot;rfi&quot;, &quot;weak_cipher&quot;)
+     * severity (Integer 0-100, required)
+     * title (String 255)
+     * description (Text)
+     * remediation (Text)
+     * discovered_at (DateTime, default=datetime.utcnow)
+     * cve_ids (JSON array of strings)
+   - Relationships:
+     * scan_run (many-to-one)
+     * subdomain (many-to-one, nullable back_populates)
+     * port_scan (many-to-one, nullable)
+   - Index: on (scan_run_id, severity)
+
+STYLE REQUIREMENTS:
+- Each class needs complete docstring
+- All fields typed
+- All relationships have back_populates
+- Foreign key constraints explicit
+- Proper indexes for query performance
+
+DO NOT:
+- Delete or modify ScanRun (keep it)
+- Create test files
+- Create migrations
+
+VERIFICATION:
+After generation, the file should have 4 models: ScanRun, Subdomain, PortScan, Vulnerability
+</div></code></pre>
+<p><strong>After Prompt 3.2:</strong></p>
+<pre class="hljs"><code><div><span class="hljs-comment"># Verify imports work</span>
+python -c <span class="hljs-string">"from backend.db.models import ScanRun, Subdomain, PortScan, Vulnerability; print('All 4 models imported OK')"</span>
+mypy backend/db/models.py
+</div></code></pre>
+<hr>
+<h3 id="prompt-33-create-httpheader-domaintechnology-technology-models">PROMPT 3.3: Create HTTPHeader, DomainTechnology, Technology Models</h3>
+<p><strong>Type:</strong> Code Generation (Add to models.py)<br>
+<strong>Expected Time:</strong> 15 minutes</p>
+<pre class="hljs"><code><div>[SYSTEM_PROMPTS PREAMBLE]
+
+TASK: Add three more models to backend/db/models.py
+
+Currently have: ScanRun, Subdomain, PortScan, Vulnerability
+Now add: HTTPHeader, DomainTechnology, Technology
+
+1. HTTPHEADER MODEL
+   - Table: &quot;http_headers&quot;
+   - Primary key: id
+   - Fields:
+     * subdomain_id (Foreign key to subdomains.id)
+     * header_name (String 255, e.g. &quot;Server&quot;, &quot;X-Frame-Options&quot;)
+     * header_value (Text)
+     * risk_level (String 20, e.g. &quot;high&quot;, &quot;medium&quot;, &quot;low&quot;, &quot;info&quot;)
+     * discovered_at (DateTime)
+   - Relationships:
+     * subdomain (many-to-one back to Subdomain)
+   - Index: on (subdomain_id, header_name)
+
+2. DOMAINTECHNOLOGY MODEL (many-to-many junction)
+   - Table: &quot;domain_technologies&quot;
+   - Primary key: id
+   - Fields:
+     * scan_run_id (Foreign key to scan_runs.id)
+     * technology_id (Foreign key to technologies.id)
+     * detected_at (DateTime)
+     * confidence (Integer 0-100, how confident in detection)
+   - Relationships:
+     * scan_run (many-to-one back to ScanRun)
+     * technology (many-to-one to Technology)
+   - Unique constraint: (scan_run_id, technology_id)
+
+3. TECHNOLOGY MODEL (shared registry)
+   - Table: &quot;technologies&quot;
+   - Primary key: id
+   - Fields:
+     * name (String 255, unique, e.g. &quot;nginx&quot;, &quot;React&quot;, &quot;WordPress&quot;)
+     * category (String 100, e.g. &quot;Web Server&quot;, &quot;Framework&quot;, &quot;CMS&quot;)
+     * version (String 100, nullable)
+     * icon_url (String 500, nullable)
+   - Relationships:
+     * domain_technologies (one-to-many back_populates)
+
+COMPLETE ALL THREE MODELS
+All typed, documented, with relationships properly defined
+
+VERIFICATION:
+from backend.db.models import ScanRun, Subdomain, PortScan, Vulnerability, HTTPHeader, DomainTechnology, Technology
+</div></code></pre>
+<hr>
+<h3 id="prompt-34-create-intelligence-models-knownvulnerability-dnsrecord-isplocation-threatintelligence">PROMPT 3.4: Create Intelligence Models (KnownVulnerability, DNSRecord, ISPLocation, ThreatIntelligence)</h3>
+<p><strong>Type:</strong> Code Generation (Add to models.py)<br>
+<strong>Expected Time:</strong> 20 minutes</p>
+<pre class="hljs"><code><div>[SYSTEM_PROMPTS PREAMBLE]
+
+TASK: Add four intelligence/data models to backend/db/models.py
+
+Now have: 7 models. Add: KnownVulnerability, DNSRecord, ISPLocation, ThreatIntelligence
+
+1. KNOWNVULNERABILITY MODEL
+   - Table: &quot;known_vulnerabilities&quot;
+   - Primary key: id
+   - Fields:
+     * technology_id (Foreign key to technologies.id)
+     * cve_id (String 50, unique, e.g. &quot;CVE-2021-12345&quot;)
+     * vuln_name (String 255)
+     * severity (Integer 0-100)
+     * advisory_url (String 500)
+     * affected_versions (JSON array of strings)
+     * fixed_version (String 100, nullable)
+   - Relationships:
+     * technology (many-to-one back to Technology)
+   - Index: on (technology_id, cve_id)
+
+2. DNSRECORD MODEL
+   - Table: &quot;dns_records&quot;
+   - Primary key: id
+   - Fields:
+     * scan_run_id (Foreign key to scan_runs.id)
+     * subdomain (String 255)
+     * record_type (String 20, &quot;A&quot;, &quot;AAAA&quot;, &quot;MX&quot;, &quot;TXT&quot;, &quot;NS&quot;, &quot;CNAME&quot;)
+     * value (String 500, the DNS record value)
+     * ttl (Integer, time to live)
+   - Relationships:
+     * scan_run (many-to-one back to ScanRun)
+   - Index: on (scan_run_id, record_type)
+
+3. ISPLOCATION MODEL
+   - Table: &quot;isp_locations&quot;
+   - Primary key: id
+   - Fields:
+     * scan_run_id (Foreign key to scan_runs.id)
+     * ip_address (String 50, IPv4 or IPv6)
+     * isp_name (String 255)
+     * country (String 100)
+     * region (String 100)
+     * city (String 100)
+     * latitude (Float, nullable)
+     * longitude (Float, nullable)
+   - Relationships:
+     * scan_run (many-to-one back to ScanRun)
+   - Index: on (scan_run_id, ip_address)
+
+4. THREATINTELLIGENCE MODEL
+   - Table: &quot;threat_intelligence&quot;
+   - Primary key: id
+   - Fields:
+     * indicator_type (String 50, &quot;ip&quot;, &quot;domain&quot;, &quot;file_hash&quot;, etc)
+     * indicator_value (String 500, the actual indicator)
+     * severity (Integer 0-100)
+     * source (String 255, e.g. &quot;AbuseIPDB&quot;, &quot;VirusTotal&quot;)
+     * description (Text)
+     * last_updated (DateTime)
+   - Relationships: None (lookup table)
+   - Index: on (indicator_type, indicator_value)
+
+Add all four models with complete docstrings and type hints
+
+VERIFICATION:
+from backend.db.models import (
+    ScanRun, Subdomain, PortScan, Vulnerability, HTTPHeader, 
+    DomainTechnology, Technology, KnownVulnerability, DNSRecord, 
+    ISPLocation, ThreatIntelligence
+)
+</div></code></pre>
+<hr>
+<h3 id="prompt-35-create-compliance--reporting-models">PROMPT 3.5: Create Compliance &amp; Reporting Models</h3>
+<p><strong>Type:</strong> Code Generation (Add to models.py)<br>
+<strong>Expected Time:</strong> 20 minutes</p>
+<pre class="hljs"><code><div>[SYSTEM_PROMPTS PREAMBLE]
+
+TASK: Add compliance and reporting models to backend/db/models.py
+
+Currently have: 11 models. Add: ComplianceReport, ComplianceFinding, RiskScore, AuditLog
+
+1. COMPLIANCEREPORT MODEL
+   - Table: &quot;compliance_reports&quot;
+   - Primary key: id
+   - Fields:
+     * scan_run_id (Foreign key, UNIQUE)
+     * report_type (String 50, &quot;pci-dss&quot;, &quot;hipaa&quot;, &quot;gdpr&quot;, &quot;iso27001&quot;)
+     * generated_at (DateTime)
+     * passed_checks (Integer)
+     * failed_checks (Integer)
+     * overall_score (Integer 0-100)
+   - Relationships:
+     * scan_run (one-to-one back_populates to ScanRun)
+     * findings (one-to-many to ComplianceFinding)
+   - Unique constraint: (scan_run_id)
+
+2. COMPLIANCEFINDING MODEL
+   - Table: &quot;compliance_findings&quot;
+   - Primary key: id
+   - Fields:
+     * report_id (Foreign key to compliance_reports.id)
+     * requirement_id (String 50, e.g. &quot;PCI-DSS-6.2&quot;)
+     * control_name (String 255)
+     * status (String 20, &quot;passed&quot;, &quot;failed&quot;, &quot;not-applicable&quot;)
+     * evidence (Text)
+     * remediation (Text)
+     * severity (String 20, &quot;critical&quot;, &quot;high&quot;, &quot;medium&quot;, &quot;low&quot;)
+   - Relationships:
+     * report (many-to-one back to ComplianceReport)
+   - Index: on (report_id, status)
+
+3. RISKSCORE MODEL
+   - Table: &quot;risk_scores&quot;
+   - Primary key: id
+   - Fields:
+     * scan_run_id (Foreign key, not unique - multiple calculations)
+     * calculation_method (String 255, version of algorithm)
+     * critical_count (Integer, CVSS 9-10)
+     * high_count (Integer, CVSS 7-8.9)
+     * medium_count (Integer, CVSS 4-6.9)
+     * low_count (Integer, CVSS 0-3.9)
+     * overall_score (Integer 0-100)
+     * calculated_at (DateTime)
+   - Relationships:
+     * scan_run (many-to-one back to ScanRun) - multiple scores per scan
+   - Index: on (scan_run_id, calculated_at)
+
+4. AUDITLOG MODEL
+   - Table: &quot;audit_logs&quot;
+   - Primary key: id
+   - Fields:
+     * user (String 255, username or &quot;system&quot;)
+     * action (String 100, e.g. &quot;created_scan&quot;, &quot;viewed_report&quot;)
+     * entity_type (String 100, &quot;ScanRun&quot;, &quot;ComplianceReport&quot;)
+     * entity_id (Integer)
+     * details (JSON, arbitrary data)
+     * timestamp (DateTime, default=datetime.utcnow)
+   - Relationships: None (audit trail)
+   - Index: on (timestamp DESC, entity_type)
+
+Add all four models with docstrings and proper typing
+
+VERIFICATION:
+from backend.db.models import (
+    ScanRun, Subdomain, PortScan, Vulnerability, HTTPHeader, 
+    DomainTechnology, Technology, KnownVulnerability, DNSRecord, 
+    ISPLocation, ThreatIntelligence, ComplianceReport, ComplianceFinding,
+    RiskScore, AuditLog
+)
+print(&quot;15 models imported successfully&quot;)
+</div></code></pre>
+<hr>
+<h3 id="prompt-36-create-asset-tracking-models">PROMPT 3.6: Create Asset Tracking Models</h3>
+<p><strong>Type:</strong> Code Generation (Add to models.py)<br>
+<strong>Expected Time:</strong> 20 minutes</p>
+<pre class="hljs"><code><div>[SYSTEM_PROMPTS PREAMBLE]
+
+TASK: Add asset change tracking models to backend/db/models.py
+
+Have: 15 models. Add: AssetSnapshot, AssetChange, ChangeNotification, WebsiteSnapshot
+
+1. ASSETSNAPSHOT MODEL
+   - Table: &quot;asset_snapshots&quot;
+   - Primary key: id
+   - Fields:
+     * scan_run_id (Foreign key to scan_runs.id)
+     * snapshot_date (Date, YYYY-MM-DD)
+     * domain_count (Integer)
+     * subdomain_count (Integer)
+     * open_port_count (Integer)
+     * vulnerability_count (Integer)
+     * critical_vuln_count (Integer, severity &gt;= 80)
+   - Relationships:
+     * scan_run (many-to-one back_populates to ScanRun)
+   - Index: on (scan_run_id, snapshot_date DESC)
+
+2. ASSETCHANGE MODEL
+   - Table: &quot;asset_changes&quot;
+   - Primary key: id
+   - Fields:
+     * previous_snapshot_id (Foreign key to asset_snapshots.id)
+     * current_snapshot_id (Foreign key to asset_snapshots.id)
+     * change_type (String 20, &quot;new&quot;, &quot;removed&quot;, &quot;modified&quot;)
+     * asset_type (String 50, &quot;subdomain&quot;, &quot;port&quot;, &quot;technology&quot;, &quot;vulnerability&quot;)
+     * description (Text)
+     * severity (String 20, &quot;critical&quot;, &quot;high&quot;, &quot;medium&quot;, &quot;low&quot;)
+   - Relationships:
+     * previous_snapshot (many-to-one to AssetSnapshot)
+     * current_snapshot (many-to-one to AssetSnapshot)
+
+3. CHANGENOTIFICATION MODEL
+   - Table: &quot;change_notifications&quot;
+   - Primary key: id
+   - Fields:
+     * asset_change_id (Foreign key to asset_changes.id)
+     * notification_type (String 20, &quot;email&quot;, &quot;webhook&quot;, &quot;slack&quot;)
+     * recipient (String 255)
+     * sent_at (DateTime)
+     * status (String 20, &quot;sent&quot;, &quot;failed&quot;, &quot;pending&quot;)
+   - Relationships:
+     * asset_change (many-to-one back to AssetChange)
+
+4. WEBSITESNAPSHOT MODEL
+   - Table: &quot;website_snapshots&quot;
+   - Primary key: id
+   - Fields:
+     * subdomain_id (Foreign key to subdomains.id)
+     * timestamp (DateTime)
+     * http_status (Integer, 200, 404, etc)
+     * content_hash (String 64, SHA256 of HTML, detect changes)
+     * screenshot_url (String 500, S3 path, nullable)
+     * crawl_depth (Integer)
+   - Relationships:
+     * subdomain (many-to-one back to Subdomain)
+   - Index: on (subdomain_id, timestamp DESC)
+
+Add all four models with complete docstrings and typing
+
+VERIFICATION:
+Can import: AssetSnapshot, AssetChange, ChangeNotification, WebsiteSnapshot
+19 models now in models.py
+</div></code></pre>
+<hr>
+<h3 id="prompt-37-create-integration--metadata-models">PROMPT 3.7: Create Integration &amp; Metadata Models</h3>
+<p><strong>Type:</strong> Code Generation (Add to models.py)<br>
+<strong>Expected Time:</strong> 20 minutes</p>
+<pre class="hljs"><code><div>[SYSTEM_PROMPTS PREAMBLE]
+
+TASK: Add final integration models to backend/db/models.py
+
+Have: 19 models. Add: ScannerIntegration, ScanRunnerMetadata, VulnerabilityMetadata, APIKey, SavedReport, ScheduledScan
+
+1. SCANNERINTEGRATION MODEL
+   - Table: &quot;scanner_integrations&quot;
+   - Primary key: id
+   - Fields:
+     * name (String 255, unique, e.g. &quot;nmap&quot;, &quot;burp&quot;, &quot;nuclei&quot;)
+     * api_endpoint (String 500, URL or socket path)
+     * status (String 50, &quot;active&quot;, &quot;inactive&quot;, &quot;error&quot;)
+     * last_check_time (DateTime, nullable)
+     * error_message (Text, nullable)
+   - Relationships: None
+   - Index: on name
+
+2. SCANNERMETADATA MODEL
+   - Table: &quot;scan_runner_metadata&quot;
+   - Primary key: id
+   - Fields:
+     * scan_run_id (Foreign key to scan_runs.id)
+     * scanner_integration_id (Foreign key to scanner_integrations.id)
+     * scanner_name (String 255)
+     * executed_at (DateTime)
+     * completed_at (DateTime, nullable)
+     * status (String 50, &quot;pending&quot;, &quot;running&quot;, &quot;completed&quot;, &quot;failed&quot;)
+     * raw_results_file (String 500, S3 path to output)
+   - Relationships:
+     * scan_run (many-to-one back_populates to ScanRun)
+     * scanner (many-to-one to ScannerIntegration)
+
+3. VULNERABILITYMETADATA MODEL
+   - Table: &quot;vulnerability_metadata&quot;
+   - Primary key: id
+   - Fields:
+     * vulnerability_id (Foreign key to vulnerabilities.id)
+     * metadata_key (String 255)
+     * metadata_value (Text, can be JSON)
+   - Relationships:
+     * vulnerability (many-to-one back to Vulnerability)
+
+4. APIKEY MODEL
+   - Table: &quot;api_keys&quot;
+   - Primary key: id
+   - Fields:
+     * user_identifier (String 255, user_id or email)
+     * key_hash (String 255, bcrypt hash)
+     * name (String 255)
+     * created_at (DateTime)
+     * expires_at (DateTime, nullable)
+     * last_used (DateTime, nullable)
+     * is_active (Boolean, default True)
+   - Relationships: None
+   - Index: on user_identifier
+
+5. SAVEDREPORT MODEL
+   - Table: &quot;saved_reports&quot;
+   - Primary key: id
+   - Fields:
+     * scan_run_id (Foreign key to scan_runs.id)
+     * report_type (String 100, &quot;executive_summary&quot;, &quot;detailed&quot;, &quot;compliance&quot;)
+     * format (String 20, &quot;pdf&quot;, &quot;html&quot;, &quot;json&quot;, &quot;csv&quot;)
+     * file_path (String 500, S3 path)
+     * generated_by (String 255, email)
+     * generated_at (DateTime)
+   - Relationships:
+     * scan_run (many-to-one back_populates to ScanRun)
+
+6. SCHEDULEDSCAN MODEL
+   - Table: &quot;scheduled_scans&quot;
+   - Primary key: id
+   - Fields:
+     * domain (String 255)
+     * scan_type (String 50, &quot;full&quot;, &quot;quick&quot;, &quot;custom&quot;)
+     * frequency (String 50, &quot;daily&quot;, &quot;weekly&quot;, &quot;monthly&quot;)
+     * next_run (DateTime)
+     * last_run (DateTime, nullable)
+     * is_active (Boolean, default True)
+     * created_by (String 255)
+   - Relationships: None
+   - Index: on (is_active, next_run)
+
+Add all six models with docstrings and typing
+
+VERIFICATION:
+Total: 25 models in backend/db/models.py
+from backend.db.models import *
+All 25 models should import without error
+</div></code></pre>
+<hr>
+<h3 id="prompt-38-create-base-configuration--imports">PROMPT 3.8: Create Base Configuration &amp; Imports</h3>
+<p><strong>Type:</strong> Code Generation (Backend setup)<br>
+<strong>Expected Time:</strong> 10 minutes<br>
+<strong>Files:</strong> backend/db/base.py, backend/db/<strong>init</strong>.py</p>
+<pre class="hljs"><code><div>[SYSTEM_PROMPTS PREAMBLE]
+
+TASK: Create Base class and __init__ files for database module
+
+FILE 1: backend/db/base.py
+This is the foundation for all SQLAlchemy models
+
+```python
+from sqlalchemy.orm import declarative_base
+
+# Base class - all models inherit from this
+Base = declarative_base()
+</div></code></pre>
+<p>FILE 2: backend/db/<strong>init</strong>.py<br>
+Export all models for easy importing</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">from</span> backend.db.base <span class="hljs-keyword">import</span> Base
+<span class="hljs-keyword">from</span> backend.db.models <span class="hljs-keyword">import</span> (
+    ScanRun, Subdomain, PortScan, Vulnerability, HTTPHeader,
+    DomainTechnology, Technology, KnownVulnerability, DNSRecord,
+    ISPLocation, ThreatIntelligence, ComplianceReport, ComplianceFinding,
+    RiskScore, AuditLog, AssetSnapshot, AssetChange, ChangeNotification,
+    WebsiteSnapshot, ScannerIntegration, ScanRunnerMetadata,
+    VulnerabilityMetadata, APIKey, SavedReport, ScheduledScan
+)
+
+__all__ = [
+    <span class="hljs-string">"Base"</span>,
+    <span class="hljs-string">"ScanRun"</span>, <span class="hljs-string">"Subdomain"</span>, <span class="hljs-string">"PortScan"</span>, <span class="hljs-string">"Vulnerability"</span>, <span class="hljs-string">"HTTPHeader"</span>,
+    <span class="hljs-string">"DomainTechnology"</span>, <span class="hljs-string">"Technology"</span>, <span class="hljs-string">"KnownVulnerability"</span>, <span class="hljs-string">"DNSRecord"</span>,
+    <span class="hljs-string">"ISPLocation"</span>, <span class="hljs-string">"ThreatIntelligence"</span>, <span class="hljs-string">"ComplianceReport"</span>, <span class="hljs-string">"ComplianceFinding"</span>,
+    <span class="hljs-string">"RiskScore"</span>, <span class="hljs-string">"AuditLog"</span>, <span class="hljs-string">"AssetSnapshot"</span>, <span class="hljs-string">"AssetChange"</span>, <span class="hljs-string">"ChangeNotification"</span>,
+    <span class="hljs-string">"WebsiteSnapshot"</span>, <span class="hljs-string">"ScannerIntegration"</span>, <span class="hljs-string">"ScanRunnerMetadata"</span>,
+    <span class="hljs-string">"VulnerabilityMetadata"</span>, <span class="hljs-string">"APIKey"</span>, <span class="hljs-string">"SavedReport"</span>, <span class="hljs-string">"ScheduledScan"</span>
+]
+</div></code></pre>
+<p>FILES TO CREATE:</p>
+<ol>
+<li>backend/db/base.py - Base class</li>
+<li>backend/db/<strong>init</strong>.py - Imports and exports</li>
+</ol>
+<p>VERIFICATION:<br>
+python -c &quot;from backend.db import Base, ScanRun, Vulnerability; print('All imports work')&quot;<br>
+mypy backend/db/</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 3.9: Create Test File for Database Models
+**Type:** Code Generation (Tests)  
+**Expected Time:** 30 minutes  
+**File:** backend/tests/test_models.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create comprehensive test suite for all 25 database models</p>
+<p>FILE: backend/tests/test_models.py</p>
+<p>Requirements:</p>
+<ul>
+<li>Use pytest framework</li>
+<li>Create fixtures for database session</li>
+<li>Test each model:
+<ul>
+<li>Can create instance</li>
+<li>All fields present</li>
+<li>Relationships work</li>
+<li>Field constraints enforced</li>
+</ul>
+</li>
+</ul>
+<p>Include tests for:</p>
+<ol>
+<li>ScanRun creation and properties</li>
+<li>Subdomain relationships to ScanRun</li>
+<li>PortScan with Subdomain</li>
+<li>Vulnerability with multiple parents</li>
+<li>HTTPHeader</li>
+<li>DomainTechnology (many-to-many)</li>
+<li>Technology</li>
+<li>KnownVulnerability</li>
+<li>DNSRecord</li>
+<li>ISPLocation</li>
+<li>ThreatIntelligence</li>
+<li>ComplianceReport and ComplianceFinding</li>
+<li>RiskScore</li>
+<li>AuditLog</li>
+<li>AssetSnapshot and AssetChange</li>
+<li>ChangeNotification</li>
+<li>WebsiteSnapshot</li>
+<li>ScannerIntegration</li>
+<li>ScanRunnerMetadata</li>
+<li>VulnerabilityMetadata</li>
+<li>APIKey</li>
+<li>SavedReport</li>
+<li>ScheduledScan</li>
+</ol>
+<p>TESTING PATTERNS:</p>
+<ul>
+<li>Each model needs at least 2 tests (creation + relationship if applicable)</li>
+<li>Test nullable fields</li>
+<li>Test default values</li>
+<li>Test field validation (if any constraints)</li>
+</ul>
+<p>EXAMPLE TEST:</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">import</span> pytest
+<span class="hljs-keyword">from</span> datetime <span class="hljs-keyword">import</span> datetime
+<span class="hljs-keyword">from</span> backend.db.models <span class="hljs-keyword">import</span> ScanRun, Subdomain
+
+<span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">test_scanrun_creation</span><span class="hljs-params">()</span>:</span>
+    <span class="hljs-string">"""Test creating a ScanRun instance."""</span>
+    scan = ScanRun(
+        domain=<span class="hljs-string">"example.com"</span>,
+        scan_type=<span class="hljs-string">"full"</span>,
+        status=<span class="hljs-string">"pending"</span>
+    )
+    <span class="hljs-keyword">assert</span> scan.domain == <span class="hljs-string">"example.com"</span>
+    <span class="hljs-keyword">assert</span> scan.scan_type == <span class="hljs-string">"full"</span>
+    <span class="hljs-keyword">assert</span> scan.status == <span class="hljs-string">"pending"</span>
+
+<span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">test_subdomain_relationship</span><span class="hljs-params">()</span>:</span>
+    <span class="hljs-string">"""Test Subdomain relationship to ScanRun."""</span>
+    scan = ScanRun(domain=<span class="hljs-string">"example.com"</span>)
+    sub = Subdomain(
+        scan_run=scan,
+        subdomain=<span class="hljs-string">"api.example.com"</span>,
+        is_alive=<span class="hljs-literal">True</span>
+    )
+    <span class="hljs-keyword">assert</span> sub.scan_run.domain == <span class="hljs-string">"example.com"</span>
+</div></code></pre>
+<p>COMPLETION:</p>
+<ul>
+<li>At least 70 test functions</li>
+<li>Coverage of all 25 models</li>
+<li>Both positive and edge case tests</li>
+<li>Docstrings on all tests</li>
+</ul>
+<p>VERIFICATION:<br>
+pytest backend/tests/test_models.py -v<br>
+Expect: 70+ PASSED tests</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 3.10: Database Models - Final Verification &amp; Commit
+**Type:** Verification &amp; Cleanup  
+**Expected Time:** 20 minutes
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Verify all database models work correctly and commit to git</p>
+<p>DO THIS:</p>
+<ol>
+<li>
+<p>SYNTAX CHECK:<br>
+python -c &quot;from backend.db import Base, ScanRun; print('Import OK')&quot;</p>
+</li>
+<li>
+<p>TYPE CHECK:<br>
+mypy backend/db/</p>
+</li>
+<li>
+<p>STYLE CHECK:<br>
+black backend/db/<br>
+flake8 backend/db/ --max-line-length=88</p>
+</li>
+<li>
+<p>IMPORT SORT:<br>
+isort backend/db/</p>
+</li>
+<li>
+<p>RUN TESTS:<br>
+pytest backend/tests/test_models.py -v</p>
+<p>Expect: All tests PASS<br>
+Expect: ~70 tests</p>
+</li>
+<li>
+<p>CHECK COVERAGE:<br>
+pytest --cov=backend.db backend/tests/test_models.py</p>
+<p>Expect: 95%+ coverage on models</p>
+</li>
+<li>
+<p>FINAL IMPORTS:<br>
+python -c &quot;from backend.db import (<br>
+ScanRun, Subdomain, PortScan, Vulnerability, HTTPHeader,<br>
+DomainTechnology, Technology, KnownVulnerability, DNSRecord,<br>
+ISPLocation, ThreatIntelligence, ComplianceReport, ComplianceFinding,<br>
+RiskScore, AuditLog, AssetSnapshot, AssetChange, ChangeNotification,<br>
+WebsiteSnapshot, ScannerIntegration, ScanRunnerMetadata,<br>
+VulnerabilityMetadata, APIKey, SavedReport, ScheduledScan<br>
+)<br>
+print('All 25 models import successfully')&quot;</p>
+</li>
+<li>
+<p>GIT COMMIT:<br>
+git add backend/db/ backend/tests/test_models.py<br>
+git commit -m &quot;feat: add 25 SQLAlchemy database models with comprehensive tests&quot;</p>
+</li>
+</ol>
+<p>SUCCESS CRITERIA:<br>
+✅ All models defined (25 total)<br>
+✅ All tests pass<br>
+✅ Coverage &gt;90%<br>
+✅ Code formatted (black, flake8, isort)<br>
+✅ Types verified (mypy)<br>
+✅ Committed to git</p>
+<p>RESULT: Week 3-4 database layer complete!</p>
+<pre class="hljs"><code><div>
+---
+
+&lt;a name=&quot;week-5-6-orchestrator&quot;&gt;&lt;/a&gt;
+
+# WEEK 5-6: Backend Orchestrator
+## Scanning Coordination System
+
+### PROMPT 5.1: Create Orchestrator Base Classes
+**Type:** Code Generation (Service Layer)  
+**Expected Time:** 20 minutes  
+**File:** backend/orchestrator/base.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create abstract base classes for the orchestrator system</p>
+<p>FILE: backend/orchestrator/base.py</p>
+<p>The orchestrator coordinates multiple scanning tools and manages the workflow.</p>
+<p>Create these abstract base classes:</p>
+<ol>
+<li>
+<p>SCANNERINTERFACE (Abstract Base Class)<br>
+Purpose: Define how all scanners must work</p>
+<p>Methods:</p>
+<ul>
+<li>scan(domain: str, options: Dict) -&gt; Dict</li>
+<li>parse_results(raw_output: str) -&gt; Dict</li>
+<li>validate_results(results: Dict) -&gt; bool</li>
+<li>get_supported_scan_types() -&gt; List[str]</li>
+</ul>
+<p>Properties:</p>
+<ul>
+<li>name: str</li>
+<li>version: str</li>
+<li>is_available: bool</li>
+</ul>
+</li>
+<li>
+<p>ORCHESTRATOR (Main Coordinator)<br>
+Purpose: Manage scanning workflow</p>
+<p>Methods:</p>
+<ul>
+<li>register_scanner(scanner: ScannerInterface) -&gt; None</li>
+<li>start_scan(scan_run: ScanRun) -&gt; None</li>
+<li>execute_phase(phase: str) -&gt; Dict</li>
+<li>update_scan_status(scan_id: int, status: str) -&gt; None</li>
+<li>handle_results(scanner_name: str, results: Dict) -&gt; None</li>
+</ul>
+<p>Attributes:</p>
+<ul>
+<li>registered_scanners: Dict[str, ScannerInterface]</li>
+<li>current_scan_run: Optional[ScanRun]</li>
+<li>phase_order: List[str]</li>
+</ul>
+</li>
+</ol>
+<p>TYPING:</p>
+<ul>
+<li>All parameters typed</li>
+<li>All returns typed</li>
+<li>Use typing.Protocol or ABC</li>
+</ul>
+<p>EXAMPLE STRUCTURE:</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">from</span> abc <span class="hljs-keyword">import</span> ABC, abstractmethod
+<span class="hljs-keyword">from</span> typing <span class="hljs-keyword">import</span> Dict, List, Optional
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">ScannerInterface</span><span class="hljs-params">(ABC)</span>:</span>
+    <span class="hljs-string">"""Abstract base for all scanning tools."""</span>
+    
+<span class="hljs-meta">    @abstractmethod</span>
+    <span class="hljs-keyword">async</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">scan</span><span class="hljs-params">(self, domain: str, options: Dict)</span> -&gt; Dict:</span>
+        <span class="hljs-string">"""Execute scan against domain."""</span>
+        <span class="hljs-keyword">pass</span>
+    
+<span class="hljs-meta">    @property</span>
+<span class="hljs-meta">    @abstractmethod</span>
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">name</span><span class="hljs-params">(self)</span> -&gt; str:</span>
+        <span class="hljs-string">"""Scanner name (e.g. 'nmap', 'burp')."""</span>
+        <span class="hljs-keyword">pass</span>
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">Orchestrator</span>:</span>
+    <span class="hljs-string">"""Coordinates multiple scanners."""</span>
+    
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">__init__</span><span class="hljs-params">(self)</span>:</span>
+        self.registered_scanners: Dict[str, ScannerInterface] = {}
+        self.current_scan_run: Optional[ScanRun] = <span class="hljs-literal">None</span>
+    
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">register_scanner</span><span class="hljs-params">(self, scanner: ScannerInterface)</span> -&gt; <span class="hljs-keyword">None</span>:</span>
+        <span class="hljs-string">"""Register a new scanner."""</span>
+        self.registered_scanners[scanner.name] = scanner
+</div></code></pre>
+<p>DOCSTRINGS:</p>
+<ul>
+<li>Complete docstrings for all classes</li>
+<li>Explain purpose and usage</li>
+<li>Document all methods</li>
+</ul>
+<p>VERIFICATION:<br>
+python -c &quot;from backend.orchestrator.base import ScannerInterface, Orchestrator; print('Orchestrator base classes OK')&quot;</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 5.2: Create Discovery Phase Implementation
+**Type:** Code Generation (Scanner Implementation)  
+**Expected Time:** 20 minutes  
+**File:** backend/orchestrator/discovery.py  
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Implement the discovery phase - finding domains and subdomains</p>
+<p>FILE: backend/orchestrator/discovery.py</p>
+<p>The discovery phase finds:</p>
+<ul>
+<li>Subdomains (passive + active enumeration)</li>
+<li>DNS records</li>
+<li>IP addresses</li>
+</ul>
+<p>Create:</p>
+<ol>
+<li>
+<p>DISCOVERYSCANNER (class inheriting from ScannerInterface)<br>
+Methods:</p>
+<ul>
+<li>
+<p>scan(domain: str, options: Dict) -&gt; Dict</p>
+<ul>
+<li>Options may include: use_passive_only, enumerate_dns, get_ips</li>
+<li>Returns: {&quot;subdomains&quot;: [list], &quot;dns_records&quot;: {dict}, &quot;ips&quot;: [list]}</li>
+</ul>
+</li>
+<li>
+<p>discover_passive_subdomains(domain: str) -&gt; List[str]</p>
+<ul>
+<li>Uses passive sources (APIs, databases)</li>
+<li>Returns list of subdomains</li>
+</ul>
+</li>
+<li>
+<p>enumerate_dns(domain: str) -&gt; Dict[str, List[str]]</p>
+<ul>
+<li>Returns DNS records by type: {&quot;A&quot;: [...], &quot;MX&quot;: [...], etc}</li>
+</ul>
+</li>
+<li>
+<p>resolve_ips(subdomains: List[str]) -&gt; List[str]</p>
+<ul>
+<li>Resolve subdomains to IPs</li>
+<li>Returns list of IP addresses</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>DISCOVERYRESULTPROCESSOR<br>
+Methods:</p>
+<ul>
+<li>process_subdomains(raw_data: Dict) -&gt; List[Subdomain]</li>
+<li>process_dns_records(raw_data: Dict) -&gt; List[DNSRecord]</li>
+<li>process_ips(raw_data: Dict) -&gt; List[ISPLocation]</li>
+</ul>
+</li>
+</ol>
+<p>IMPLEMENTATION NOTES:</p>
+<ul>
+<li>Async/await for I/O operations</li>
+<li>Error handling (timeout, connection errors)</li>
+<li>Logging of progress</li>
+<li>Validates domain format</li>
+</ul>
+<p>EXAMPLE:</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">from</span> backend.orchestrator.base <span class="hljs-keyword">import</span> ScannerInterface
+<span class="hljs-keyword">from</span> typing <span class="hljs-keyword">import</span> Dict, List
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">DiscoveryScanner</span><span class="hljs-params">(ScannerInterface)</span>:</span>
+    <span class="hljs-string">"""Discovers subdomains, DNS records, and IPs."""</span>
+    
+<span class="hljs-meta">    @property</span>
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">name</span><span class="hljs-params">(self)</span> -&gt; str:</span>
+        <span class="hljs-keyword">return</span> <span class="hljs-string">"discovery"</span>
+    
+    <span class="hljs-keyword">async</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">scan</span><span class="hljs-params">(self, domain: str, options: Dict)</span> -&gt; Dict:</span>
+        <span class="hljs-string">"""Execute discovery scan."""</span>
+        subdomains = <span class="hljs-keyword">await</span> self.discover_passive_subdomains(domain)
+        dns_records = <span class="hljs-keyword">await</span> self.enumerate_dns(domain)
+        ips = <span class="hljs-keyword">await</span> self.resolve_ips(subdomains)
+        
+        <span class="hljs-keyword">return</span> {
+            <span class="hljs-string">"domain"</span>: domain,
+            <span class="hljs-string">"subdomains"</span>: subdomains,
+            <span class="hljs-string">"dns_records"</span>: dns_records,
+            <span class="hljs-string">"ips"</span>: ips
+        }
+</div></code></pre>
+<p>VERIFICATION:<br>
+python -c &quot;from backend.orchestrator.discovery import DiscoveryScanner; print('DiscoveryScanner OK')&quot;</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 5.3: Create Port Scanning Phase
+**Type:** Code Generation (Scanner Implementation)  
+**Expected Time:** 15 minutes  
+**File:** backend/orchestrator/portscan.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Implement port scanning phase</p>
+<p>FILE: backend/orchestrator/portscan.py</p>
+<p>Create PORT SCANNER that:</p>
+<ul>
+<li>Scans common ports on live hosts</li>
+<li>Detects services and versions</li>
+<li>Returns PortScan objects</li>
+</ul>
+<ol>
+<li>
+<p>PORTSCANSCANNER (inherits ScannerInterface)<br>
+Methods:</p>
+<ul>
+<li>
+<p>scan(ip: str, options: Dict) -&gt; Dict</p>
+<ul>
+<li>Options: top_ports (default 1000), aggressive (default False)</li>
+<li>Returns: {&quot;ip&quot;: str, &quot;ports&quot;: [list of PortScan dicts]}</li>
+</ul>
+</li>
+<li>
+<p>scan_ports(ip: str, port_list: List[int]) -&gt; List[Dict]</p>
+<ul>
+<li>Scan specific ports</li>
+<li>Returns port info with state/service/version</li>
+</ul>
+</li>
+<li>
+<p>detect_service(port: int, banner: str) -&gt; str</p>
+<ul>
+<li>Identify service from port/banner</li>
+<li>Returns service name</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>PORTSCANRESULTPROCESSOR<br>
+Methods:</p>
+<ul>
+<li>process_port_results(host: str, raw_data: Dict) -&gt; List[PortScan]
+<ul>
+<li>Convert raw scan output to PortScan models</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<p>Key fields in results:</p>
+<ul>
+<li>port (int)</li>
+<li>protocol (&quot;tcp&quot; or &quot;udp&quot;)</li>
+<li>state (&quot;open&quot;, &quot;closed&quot;, &quot;filtered&quot;)</li>
+<li>service (optional, e.g. &quot;HTTP&quot;, &quot;SSH&quot;)</li>
+<li>version (optional)</li>
+</ul>
+<p>VERIFICATION:<br>
+from backend.orchestrator.portscan import PortScanScanner</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 5.4: Create HTTP/Content Analysis Phase
+**Type:** Code Generation (Scanner Implementation)  
+**Expected Time:** 20 minutes  
+**File:** backend/orchestrator/content.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Implement HTTP content analysis phase</p>
+<p>FILE: backend/orchestrator/content.py</p>
+<p>Analyzes web content and HTTP headers:</p>
+<ul>
+<li>Fetches HTTP headers</li>
+<li>Identifies technologies</li>
+<li>Analyzes JavaScript</li>
+<li>Takes screenshots</li>
+</ul>
+<ol>
+<li>
+<p>CONTENTSCANNER (inherits ScannerInterface)<br>
+Methods:</p>
+<ul>
+<li>
+<p>scan(url: str, options: Dict) -&gt; Dict</p>
+</li>
+<li>
+<p>fetch_headers(url: str) -&gt; Dict[str, str]</p>
+<ul>
+<li>Get HTTP response headers</li>
+</ul>
+</li>
+<li>
+<p>identify_technologies(headers: Dict, html: str) -&gt; List[str]</p>
+<ul>
+<li>Detect frameworks, servers, etc</li>
+<li>Returns list of technology names</li>
+</ul>
+</li>
+<li>
+<p>extract_javascript(html: str) -&gt; List[str]</p>
+<ul>
+<li>Find JavaScript files</li>
+<li>Returns URLs</li>
+</ul>
+</li>
+<li>
+<p>take_screenshot(url: str) -&gt; str</p>
+<ul>
+<li>Capture webpage</li>
+<li>Returns S3 path</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>CONTENTRESULTPROCESSOR<br>
+Methods:</p>
+<ul>
+<li>process_headers(url: str, headers: Dict) -&gt; List[HTTPHeader]</li>
+<li>process_technologies(url: str, techs: List[str]) -&gt; List[DomainTechnology]</li>
+</ul>
+</li>
+</ol>
+<p>Results should include:</p>
+<ul>
+<li>HTTP status code</li>
+<li>Server version</li>
+<li>Security headers (X-Frame-Options, etc)</li>
+<li>Identified technologies</li>
+<li>Screenshot path</li>
+</ul>
+<p>VERIFICATION:<br>
+from backend.orchestrator.content import ContentScanner</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 5.5: Create Vulnerability Scanning Phase
+**Type:** Code Generation (Scanner Implementation)  
+**Expected Time:** 20 minutes  
+**File:** backend/orchestrator/vulnscan.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Implement vulnerability scanning phase</p>
+<p>FILE: backend/orchestrator/vulnscan.py</p>
+<p>Finds vulnerabilities using multiple tools:</p>
+<ul>
+<li>Web vulnerabilities (XSS, SQLi, etc)</li>
+<li>Container vulnerabilities</li>
+<li>Dependency vulnerabilities</li>
+</ul>
+<ol>
+<li>
+<p>VULNERABILITYSCANNER (inherits ScannerInterface)<br>
+Methods:</p>
+<ul>
+<li>
+<p>scan(target: str, options: Dict) -&gt; Dict</p>
+<ul>
+<li>target can be URL, IP, or container image</li>
+<li>Returns: {&quot;vulnerabilities&quot;: [list], &quot;scan_method&quot;: str}</li>
+</ul>
+</li>
+<li>
+<p>scan_web_vulnerabilities(url: str) -&gt; List[Dict]</p>
+<ul>
+<li>Web app scanning</li>
+<li>Returns vuln list</li>
+</ul>
+</li>
+<li>
+<p>scan_container_vulns(image: str) -&gt; List[Dict]</p>
+<ul>
+<li>Container image scanning</li>
+<li>Returns vuln list</li>
+</ul>
+</li>
+<li>
+<p>scan_dependencies(repo_path: str) -&gt; List[Dict]</p>
+<ul>
+<li>Scan code dependencies for known CVEs</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>VULNRESULTPROCESSOR<br>
+Methods:</p>
+<ul>
+<li>process_vulnerabilities(raw_vulns: List[Dict]) -&gt; List[Vulnerability]</li>
+<li>calculate_severity(vuln: Dict) -&gt; int
+<ul>
+<li>Convert CVSS/other formats to 0-100 scale</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<p>Result fields:</p>
+<ul>
+<li>vuln_type (xss, sqli, weak_cipher, etc)</li>
+<li>severity (0-100)</li>
+<li>title</li>
+<li>description</li>
+<li>remediation</li>
+<li>cve_ids (if applicable)</li>
+</ul>
+<p>VERIFICATION:<br>
+from backend.orchestrator.vulnscan import VulnerabilityScanner</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 5.6: Create Orchestrator State Manager
+**Type:** Code Generation (State Management)  
+**Expected Time:** 20 minutes  
+**File:** backend/orchestrator/state.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Implement state management for orchestrator</p>
+<p>FILE: backend/orchestrator/state.py</p>
+<p>Manages scanning state and progress:</p>
+<ul>
+<li>Track current phase</li>
+<li>Store interim results</li>
+<li>Handle failures and retries</li>
+<li>Recover from interruptions</li>
+</ul>
+<p>Create:</p>
+<ol>
+<li>
+<p>SCANSTATE (dataclass or simple class)<br>
+Attributes:</p>
+<ul>
+<li>scan_id: int (ScanRun ID)</li>
+<li>current_phase: str (&quot;discovery&quot;, &quot;portscan&quot;, &quot;content&quot;, &quot;vulnscan&quot;)</li>
+<li>phase_progress: Dict[str, Any]</li>
+<li>start_time: DateTime</li>
+<li>last_update: DateTime</li>
+<li>status: str (&quot;pending&quot;, &quot;running&quot;, &quot;failed&quot;, &quot;completed&quot;)</li>
+<li>error_message: Optional[str]</li>
+</ul>
+</li>
+<li>
+<p>STATEMANAGER (handles state)<br>
+Methods:</p>
+<ul>
+<li>
+<p>save_state(state: ScanState) -&gt; None</p>
+<ul>
+<li>Persist to database</li>
+</ul>
+</li>
+<li>
+<p>load_state(scan_id: int) -&gt; ScanState</p>
+<ul>
+<li>Load from database</li>
+</ul>
+</li>
+<li>
+<p>update_phase(scan_id: int, phase: str) -&gt; None</p>
+<ul>
+<li>Move to next phase</li>
+</ul>
+</li>
+<li>
+<p>save_phase_results(scan_id: int, phase: str, results: Dict) -&gt; None</p>
+<ul>
+<li>Store interim results</li>
+</ul>
+</li>
+<li>
+<p>handle_failure(scan_id: int, error: str) -&gt; None</p>
+<ul>
+<li>Mark scan as failed</li>
+</ul>
+</li>
+<li>
+<p>can_resume(scan_id: int) -&gt; bool</p>
+<ul>
+<li>Check if scan can be resumed</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>RESULTCOLLECTOR<br>
+Methods:</p>
+<ul>
+<li>collect_results(phase: str, results: Dict) -&gt; None</li>
+<li>compile_final_report() -&gt; Dict
+<ul>
+<li>Combine all phases into final results</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<p>STORAGE: Use database (ScanRun, AuditLog) for persistence</p>
+<p>VERIFICATION:<br>
+from backend.orchestrator.state import ScanState, StateManager</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 5.7: Create Main Orchestrator Coordinator
+**Type:** Code Generation (Orchestration Logic)  
+**Expected Time:** 25 minutes  
+**File:** backend/orchestrator/coordinator.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create the main orchestrator that coordinates all phases</p>
+<p>FILE: backend/orchestrator/coordinator.py</p>
+<p>This is the &quot;conductor&quot; that runs the full orchestra of scanners.</p>
+<p>Create:</p>
+<ol>
+<li>
+<p>SCANORCHESTRATOR (Main class)<br>
+Attributes:</p>
+<ul>
+<li>discovery_scanner: DiscoveryScanner</li>
+<li>portscan_scanner: PortScanScanner</li>
+<li>content_scanner: ContentScanner</li>
+<li>vuln_scanner: VulnerabilityScanner</li>
+<li>state_manager: StateManager</li>
+<li>result_collector: ResultCollector</li>
+</ul>
+<p>Methods:</p>
+<ul>
+<li>
+<p>execute_full_scan(scan_run_id: int, domain: str) -&gt; Dict</p>
+<ul>
+<li>Orchestrate all phases in sequence</li>
+<li>Phase order: discovery → portscan → content → vulnscan</li>
+</ul>
+</li>
+<li>
+<p>execute_phase(phase: str, phase_input: Dict) -&gt; Dict</p>
+<ul>
+<li>Execute one phase</li>
+<li>Updates state</li>
+<li>Handles errors</li>
+</ul>
+</li>
+<li>
+<p>_discovery_phase(domain: str) -&gt; Dict</p>
+</li>
+<li>
+<p>_portscan_phase(hosts: List[str]) -&gt; Dict</p>
+</li>
+<li>
+<p>_content_phase(subdomains: List[str]) -&gt; Dict</p>
+</li>
+<li>
+<p>_vulnscan_phase(targets: List[str]) -&gt; Dict</p>
+</li>
+<li>
+<p>abort_scan(scan_run_id: int) -&gt; None</p>
+</li>
+<li>
+<p>resume_scan(scan_run_id: int) -&gt; None</p>
+</li>
+</ul>
+</li>
+</ol>
+<p>WORKFLOW:<br>
+Phase 1: Discovery<br>
+Input: domain &quot;example.com&quot;<br>
+Output: subdomains, DNS records, IPs</p>
+<p>Phase 2: Port Scanning<br>
+Input: list of IPs from Phase 1<br>
+Output: open ports and services</p>
+<p>Phase 3: Content Analysis<br>
+Input: live URLs from Phases 1 &amp; 2<br>
+Output: technologies, headers, screenshots</p>
+<p>Phase 4: Vulnerability Scanning<br>
+Input: all targets from previous phases<br>
+Output: vulnerabilities, CVSS scores</p>
+<p>Final: Compile Results<br>
+Combine all findings into ScanRun</p>
+<p>ERROR HANDLING:</p>
+<ul>
+<li>If phase fails: log error, can retry</li>
+<li>Network timeout: exponential backoff</li>
+<li>Invalid target: log and skip</li>
+</ul>
+<p>PROGRESS TRACKING:</p>
+<ul>
+<li>Update ScanRun.status as phases complete</li>
+<li>Log to AuditLog</li>
+<li>Save StateManager checkpoints</li>
+</ul>
+<p>EXAMPLE:</p>
+<pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">ScanOrchestrator</span>:</span>
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">execute_full_scan</span><span class="hljs-params">(self, scan_run_id: int, domain: str)</span> -&gt; Dict:</span>
+        <span class="hljs-comment"># Load or create scan state</span>
+        <span class="hljs-comment"># Phase 1: Discovery</span>
+        discovery_results = <span class="hljs-keyword">await</span> self._discovery_phase(domain)
+        <span class="hljs-comment"># Phase 2: Port Scan</span>
+        portscan_results = <span class="hljs-keyword">await</span> self._portscan_phase(discovery_results[<span class="hljs-string">"ips"</span>])
+        <span class="hljs-comment"># Phase 3: Content</span>
+        content_results = <span class="hljs-keyword">await</span> self._content_phase(discovery_results[<span class="hljs-string">"subdomains"</span>])
+        <span class="hljs-comment"># Phase 4: Vulns</span>
+        vuln_results = <span class="hljs-keyword">await</span> self._vulnscan_phase(content_results[<span class="hljs-string">"urls"</span>])
+        <span class="hljs-comment"># Compile</span>
+        <span class="hljs-keyword">return</span> self.result_collector.compile_final_report()
+</div></code></pre>
+<p>VERIFICATION:<br>
+from backend.orchestrator.coordinator import ScanOrchestrator</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 5.8: Create Orchestrator Tests
+**Type:** Code Generation (Tests)  
+**Expected Time:** 30 minutes  
+**File:** backend/tests/test_orchestrator.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create tests for orchestrator modules</p>
+<p>FILE: backend/tests/test_orchestrator.py</p>
+<p>Test each scanner and the orchestrator:</p>
+<ol>
+<li>
+<p>TEST DISCOVERY SCANNER</p>
+<ul>
+<li>test_discover_subdomains_returns_list()</li>
+<li>test_enumerate_dns_returns_records()</li>
+<li>test_resolve_ips_returns_ips()</li>
+</ul>
+</li>
+<li>
+<p>TEST PORT SCANNER</p>
+<ul>
+<li>test_scan_ports_returns_open_ports()</li>
+<li>test_detect_service_identifies_http()</li>
+<li>test_handles_unreachable_hosts()</li>
+</ul>
+</li>
+<li>
+<p>TEST CONTENT SCANNER</p>
+<ul>
+<li>test_fetch_headers_returns_dict()</li>
+<li>test_identify_technologies_finds_frameworks()</li>
+<li>test_extract_javascript_returns_urls()</li>
+</ul>
+</li>
+<li>
+<p>TEST VULN SCANNER</p>
+<ul>
+<li>test_scan_web_returns_vulnerabilities()</li>
+<li>test_scan_container_returns_vulns()</li>
+<li>test_scan_dependencies_finds_cves()</li>
+</ul>
+</li>
+<li>
+<p>TEST STATE MANAGER</p>
+<ul>
+<li>test_save_and_load_state()</li>
+<li>test_update_phase_changes_state()</li>
+<li>test_save_phase_results_persists_data()</li>
+</ul>
+</li>
+<li>
+<p>TEST ORCHESTRATOR</p>
+<ul>
+<li>test_execute_full_scan_completes_all_phases()</li>
+<li>test_phase_sequence_correct()</li>
+<li>test_abort_scan_stops_processing()</li>
+<li>test_resume_scan_continues_from_checkpoint()</li>
+</ul>
+</li>
+<li>
+<p>TEST RESULT COLLECTION</p>
+<ul>
+<li>test_compile_final_report_merges_results()</li>
+</ul>
+</li>
+</ol>
+<p>At least 40 test functions covering:</p>
+<ul>
+<li>Happy path (normal operation)</li>
+<li>Error cases (invalid input, failures)</li>
+<li>Edge cases (empty results, timeouts)</li>
+</ul>
+<p>VERIFICATION:<br>
+pytest backend/tests/test_orchestrator.py -v<br>
+Coverage &gt;85%</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 5.9: Create __init__ Files for Orchestrator Module
+**Type:** Code Generation (Module Setup)  
+**Expected Time:** 5 minutes  
+**File:** backend/orchestrator/__init__.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create package initialization for orchestrator</p>
+<p>FILE: backend/orchestrator/<strong>init</strong>.py</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">from</span> backend.orchestrator.base <span class="hljs-keyword">import</span> ScannerInterface, Orchestrator
+<span class="hljs-keyword">from</span> backend.orchestrator.discovery <span class="hljs-keyword">import</span> DiscoveryScanner
+<span class="hljs-keyword">from</span> backend.orchestrator.portscan <span class="hljs-keyword">import</span> PortScanScanner
+<span class="hljs-keyword">from</span> backend.orchestrator.content <span class="hljs-keyword">import</span> ContentScanner
+<span class="hljs-keyword">from</span> backend.orchestrator.vulnscan <span class="hljs-keyword">import</span> VulnerabilityScanner
+<span class="hljs-keyword">from</span> backend.orchestrator.state <span class="hljs-keyword">import</span> ScanState, StateManager
+<span class="hljs-keyword">from</span> backend.orchestrator.coordinator <span class="hljs-keyword">import</span> ScanOrchestrator
+
+__all__ = [
+    <span class="hljs-string">"ScannerInterface"</span>,
+    <span class="hljs-string">"Orchestrator"</span>,
+    <span class="hljs-string">"DiscoveryScanner"</span>,
+    <span class="hljs-string">"PortScanScanner"</span>,
+    <span class="hljs-string">"ContentScanner"</span>,
+    <span class="hljs-string">"VulnerabilityScanner"</span>,
+    <span class="hljs-string">"ScanState"</span>,
+    <span class="hljs-string">"StateManager"</span>,
+    <span class="hljs-string">"ScanOrchestrator"</span>,
+]
+</div></code></pre>
+<p>VERIFICATION:<br>
+python -c &quot;from backend.orchestrator import ScanOrchestrator; print('Orchestrator package OK')&quot;</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 5.10: Orchestrator Verification &amp; Commit
+**Type:** Verification &amp; Cleanup  
+**Expected Time:** 20 minutes
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Verify orchestrator implementation and commit</p>
+<p>DO THIS:</p>
+<ol>
+<li>
+<p>IMPORT CHECKS:<br>
+python -c &quot;from backend.orchestrator import (<br>
+ScanOrchestrator, DiscoveryScanner, PortScanScanner,<br>
+ContentScanner, VulnerabilityScanner<br>
+); print('All orchestrator modules OK')&quot;</p>
+</li>
+<li>
+<p>TYPE CHECKING:<br>
+mypy backend/orchestrator/</p>
+</li>
+<li>
+<p>STYLE CHECKING:<br>
+black backend/orchestrator/ backend/tests/test_orchestrator.py<br>
+flake8 backend/orchestrator/ --max-line-length=88<br>
+isort backend/orchestrator/</p>
+</li>
+<li>
+<p>RUN TESTS:<br>
+pytest backend/tests/test_orchestrator.py -v<br>
+Expect: 40+ tests PASS</p>
+</li>
+<li>
+<p>COVERAGE:<br>
+pytest --cov=backend.orchestrator backend/tests/test_orchestrator.py<br>
+Expect: 85%+ coverage</p>
+</li>
+<li>
+<p>BUILD CHECK:<br>
+make lint<br>
+make type-check<br>
+make test</p>
+</li>
+</ol>
+<p>SUCCESS CRITERIA:<br>
+✅ All orchestrator scanners implemented (5 total)<br>
+✅ State management working<br>
+✅ Coordinator orchestrates phases<br>
+✅ 40+ tests passing<br>
+✅ 85%+ coverage<br>
+✅ Code formatted and typed<br>
+✅ Ready for Week 7</p>
+<ol start="7">
+<li>GIT COMMIT:<br>
+git add backend/orchestrator/ backend/tests/test_orchestrator.py<br>
+git commit -m &quot;feat: add backend orchestrator with 5 scanning phases&quot;</li>
+</ol>
+<p>RESULT: Week 5-6 orchestrator complete!</p>
+<pre class="hljs"><code><div>
+---
+
+&lt;a name=&quot;week-7-8-intelligence-1&quot;&gt;&lt;/a&gt;
+
+# WEEK 7-8: Intelligence Modules (Part 1)
+## Risk Scoring &amp; Threat Intelligence
+
+### PROMPT 7.1: Create Risk Scoring Engine
+**Type:** Code Generation (Intelligence Module)  
+**Expected Time:** 20 minutes  
+**File:** backend/intelligence/risk_scorer.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create risk scoring engine for vulnerability assessment</p>
+<p>FILE: backend/intelligence/risk_scorer.py</p>
+<p>Calculates overall risk scores based on findings:</p>
+<ul>
+<li>CVSS to 0-100 conversion</li>
+<li>Vulnerability weighting</li>
+<li>Asset criticality factoring</li>
+<li>Historical trends</li>
+</ul>
+<p>Create:</p>
+<ol>
+<li>
+<p>RISKSCORE (data class)<br>
+Attributes:</p>
+<ul>
+<li>critical_count: int (CVSS 9-10)</li>
+<li>high_count: int (CVSS 7-8.9)</li>
+<li>medium_count: int (CVSS 4-6.9)</li>
+<li>low_count: int (CVSS 0-3.9)</li>
+<li>overall_score: int (0-100)</li>
+<li>calculation_date: DateTime</li>
+<li>calculation_method: str (algorithm version)</li>
+</ul>
+</li>
+<li>
+<p>RISKSCORINGENGINE<br>
+Methods:</p>
+<ul>
+<li>
+<p>calculate_overall_score(vulnerabilities: List[Vulnerability]) -&gt; int</p>
+<ul>
+<li>Returns 0-100 score</li>
+<li>Critical = 50% weight</li>
+<li>High = 30% weight</li>
+<li>Medium = 15% weight</li>
+<li>Low = 5% weight</li>
+</ul>
+</li>
+<li>
+<p>calculate_cvss_normalized(cvss: float) -&gt; int</p>
+<ul>
+<li>Convert CVSS 0-10 scale to 0-100</li>
+<li>Formula: score = (cvss / 10) * 100</li>
+</ul>
+</li>
+<li>
+<p>factor_asset_criticality(base_score: int, asset: str) -&gt; int</p>
+<ul>
+<li>Increase score if asset is critical</li>
+<li>Web server = +15%</li>
+<li>Database = +25%</li>
+<li>Admin interface = +30%</li>
+</ul>
+</li>
+<li>
+<p>factor_historical_trend(current_score: int, previous_score: int) -&gt; int</p>
+<ul>
+<li>Score increase = worse</li>
+<li>Score decrease = better</li>
+<li>Trend affects urgency</li>
+</ul>
+</li>
+<li>
+<p>categorize_risk(score: int) -&gt; str</p>
+<ul>
+<li>0-20: Low</li>
+<li>21-50: Medium</li>
+<li>51-75: High</li>
+<li>76-100: Critical</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>RISKSCORERESULT (output model)</p>
+<ul>
+<li>overall_score: int</li>
+<li>risk_category: str</li>
+<li>critical_vulns: int</li>
+<li>high_vulns: int</li>
+<li>medium_vulns: int</li>
+<li>low_vulns: int</li>
+<li>top_risks: List[str] (top 5 vulnerabilities)</li>
+<li>recommendations: List[str] (remediation priorities)</li>
+</ul>
+</li>
+</ol>
+<p>ALGORITHM:</p>
+<pre class="hljs"><code><div>overall_score = (
+    critical_count * 50 +
+    high_count * 30 +
+    medium_count * 15 +
+    low_count * 5
+) / total_vulns * 100
+
+Then apply asset criticality factor
+Then apply trend factor
+Cap at 100
+</div></code></pre>
+<p>VERIFICATION:<br>
+from backend.intelligence.risk_scorer import RiskScoringEngine</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 7.2: Create Threat Intelligence Integration
+**Type:** Code Generation (Intelligence Module)  
+**Expected Time:** 25 minutes  
+**File:** backend/intelligence/threat_intel.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create threat intelligence integration module</p>
+<p>FILE: backend/intelligence/threat_intel.py</p>
+<p>Queries external threat feeds for malicious IPs, domains, files:</p>
+<ul>
+<li>AbuseIPDB (IP reputation)</li>
+<li>VirusTotal (file/domain reputation)</li>
+<li>Custom threat feeds</li>
+</ul>
+<p>Create:</p>
+<ol>
+<li>
+<p>THREATINTELLIGENCEAPI (abstract base)<br>
+Methods:</p>
+<ul>
+<li>check_ip(ip: str) -&gt; Dict[str, Any]</li>
+<li>check_domain(domain: str) -&gt; Dict[str, Any]</li>
+<li>check_file_hash(hash: str) -&gt; Dict[str, Any]</li>
+</ul>
+</li>
+<li>
+<p>ABUSEIPDB INTEGRATION</p>
+<ul>
+<li>check_ip_reputation(ip: str) -&gt; Dict</li>
+<li>Returns: {<br>
+&quot;is_malicious&quot;: bool,<br>
+&quot;abuse_score&quot;: 0-100,<br>
+&quot;reports&quot;: int,<br>
+&quot;last_reported&quot;: DateTime,<br>
+&quot;threat_types&quot;: List[str]<br>
+}</li>
+</ul>
+</li>
+<li>
+<p>VIRUSTOTAL INTEGRATION</p>
+<ul>
+<li>check_domain(domain: str) -&gt; Dict</li>
+<li>check_file(hash: str) -&gt; Dict</li>
+<li>Returns: {<br>
+&quot;is_detected&quot;: bool,<br>
+&quot;detections&quot;: int,<br>
+&quot;vendors&quot;: List[str],<br>
+&quot;last_update&quot;: DateTime<br>
+}</li>
+</ul>
+</li>
+<li>
+<p>THREATINTELSUMMARY<br>
+Methods:</p>
+<ul>
+<li>
+<p>enrich_vulnerabilities(vulns: List[Vulnerability]) -&gt; List[Dict]</p>
+<ul>
+<li>For each vuln, add threat intel</li>
+</ul>
+</li>
+<li>
+<p>flag_malicious_hosts(hosts: List[str]) -&gt; List[Dict]</p>
+<ul>
+<li>Check IP/domain reputation</li>
+</ul>
+</li>
+<li>
+<p>compile_threat_report(scan_results: Dict) -&gt; Dict</p>
+<ul>
+<li>Summary of all threats found</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<p>EXTERNAL INTEGRATIONS:</p>
+<ul>
+<li>AbuseIPDB API: Query IP reputation</li>
+<li>VirusTotal API: Query domain/file reputation</li>
+<li>Custom feeds: Optional local threat database</li>
+</ul>
+<p>ERROR HANDLING:</p>
+<ul>
+<li>API rate limits: Queue requests</li>
+<li>API failures: Fallback to cached data</li>
+<li>Invalid input: Validation before query</li>
+</ul>
+<p>CACHING:</p>
+<ul>
+<li>Cache threat intel results (24 hours)</li>
+<li>Avoid repeated API calls</li>
+</ul>
+<p>VERIFICATION:<br>
+from backend.intelligence.threat_intel import ThreatIntelligence</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 7.3: Create Compliance Checker Module
+**Type:** Code Generation (Intelligence Module)  
+**Expected Time:** 25 minutes  
+**File:** backend/intelligence/compliance_checker.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create compliance checking for standards like PCI-DSS, HIPAA, GDPR</p>
+<p>FILE: backend/intelligence/compliance_checker.py</p>
+<p>Evaluates scan results against compliance frameworks:</p>
+<ul>
+<li>PCI-DSS (Payment Card Industry)</li>
+<li>HIPAA (Healthcare)</li>
+<li>GDPR (Data Privacy)</li>
+<li>ISO 27001 (InfoSec)</li>
+</ul>
+<p>Create:</p>
+<ol>
+<li>
+<p>COMPLIANCEFRAMEWORK (abstract base)<br>
+Methods:</p>
+<ul>
+<li>evaluate(scan_results: Dict) -&gt; ComplianceReport</li>
+<li>get_requirements() -&gt; List[str]</li>
+<li>get_controls() -&gt; List[Dict]</li>
+</ul>
+</li>
+<li>
+<p>PCIDSS FRAMEWORK<br>
+Key controls:</p>
+<ul>
+<li>Control 1: Firewall configuration (check for open ports)</li>
+<li>Control 6: Secure SDLC (check for web vulns)</li>
+<li>Control 10: Logging (check for log aggregation)</li>
+<li>Etc.</li>
+</ul>
+<p>Methods:</p>
+<ul>
+<li>check_firewall_rules(open_ports: List[int]) -&gt; bool</li>
+<li>check_ssl_tls(certs: List[Dict]) -&gt; bool</li>
+<li>check_vulnerability_scanning() -&gt; bool</li>
+</ul>
+</li>
+<li>
+<p>HIPAA FRAMEWORK<br>
+Controls:</p>
+<ul>
+<li>Access controls (check auth)</li>
+<li>Encryption (check HTTPS)</li>
+<li>Audit logging</li>
+</ul>
+</li>
+<li>
+<p>GDPR FRAMEWORK<br>
+Checks:</p>
+<ul>
+<li>Data minimization (PII exposure)</li>
+<li>Right to erasure capability</li>
+<li>Data residency</li>
+</ul>
+</li>
+<li>
+<p>ISO27001 FRAMEWORK<br>
+Checks:</p>
+<ul>
+<li>Information security policies</li>
+<li>Asset management</li>
+<li>Access control</li>
+<li>Cryptography</li>
+</ul>
+</li>
+<li>
+<p>COMPLIANCEREPORTGENERATOR<br>
+Methods:</p>
+<ul>
+<li>generate_report(framework: str, scan_results: Dict) -&gt; ComplianceReport</li>
+<li>calculate_compliance_score() -&gt; int (0-100)</li>
+<li>identify_gaps() -&gt; List[str]</li>
+<li>recommend_remediation() -&gt; List[str]</li>
+</ul>
+</li>
+</ol>
+<p>LOGIC:</p>
+<pre class="hljs"><code><div>For each control:
+  - Pass/Fail based on findings
+  - Determine severity if fails
+  - Calculate overall compliance %
+
+Example:
+  Control requires: No XSS vulnerabilities
+  Scan found: 2 XSS vulns
+  Result: FAILED
+  Severity: MEDIUM
+</div></code></pre>
+<p>REPORT OUTPUT:</p>
+<ul>
+<li>Framework name</li>
+<li>% Compliance (passed_controls / total_controls * 100)</li>
+<li>Passed controls (list)</li>
+<li>Failed controls (list)</li>
+<li>Recommendations</li>
+</ul>
+<p>VERIFICATION:<br>
+from backend.intelligence.compliance_checker import ComplianceChecker</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 7.4: Create Dependency Graph Analyzer
+**Type:** Code Generation (Intelligence Module)  
+**Expected Time:** 20 minutes  
+**File:** backend/intelligence/dependency_mapper.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create technology dependency mapping</p>
+<p>FILE: backend/intelligence/dependency_mapper.py</p>
+<p>Maps technology dependencies and relationships:</p>
+<ul>
+<li>Technology A uses Library B</li>
+<li>Vulnerability in B affects A</li>
+<li>Chain of trust analysis</li>
+</ul>
+<p>Create:</p>
+<ol>
+<li>
+<p>DEPENDENCYGRAPH (data structure)<br>
+Attributes:</p>
+<ul>
+<li>nodes: Dict[str, Technology] (technology nodes)</li>
+<li>edges: List[Tuple[str, str]] (dependencies)</li>
+</ul>
+<p>Methods:</p>
+<ul>
+<li>add_node(tech: Technology) -&gt; None</li>
+<li>add_edge(parent: str, dependency: str) -&gt; None</li>
+<li>get_dependents(tech: str) -&gt; List[str]
+<ul>
+<li>What depends on this tech?</li>
+</ul>
+</li>
+<li>get_dependencies(tech: str) -&gt; List[str]
+<ul>
+<li>What does this tech depend on?</li>
+</ul>
+</li>
+<li>find_affected_chain(vuln_tech: str) -&gt; List[str]
+<ul>
+<li>All techs affected by vulnerability in vuln_tech</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>DEPENDENCYMAPPER<br>
+Methods:</p>
+<ul>
+<li>
+<p>build_graph(scan_results: Dict) -&gt; DependencyGraph</p>
+<ul>
+<li>Create dependency graph from scan findings</li>
+</ul>
+</li>
+<li>
+<p>analyze_vulnerabilities(graph: DependencyGraph, vulns: List[Vulnerability]) -&gt; Dict</p>
+<ul>
+<li>Map vulnerabilities through dependency chain</li>
+<li>Returns: which technologies affected</li>
+</ul>
+</li>
+<li>
+<p>calculate_blast_radius(vuln_tech: str) -&gt; int</p>
+<ul>
+<li>How many other systems affected?</li>
+<li>Returns count of affected systems</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>RISKPROPAGATION<br>
+Methods:</p>
+<ul>
+<li>propagate_vulnerability_risk(base_risk: int, depth: int) -&gt; int
+<ul>
+<li>Vulnerability in dep = 80% of parent risk</li>
+<li>Each level down = -20%</li>
+<li>Quantify blast radius</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<p>EXAMPLE:</p>
+<pre class="hljs"><code><div>nginx (web server)
+  ↓ uses
+OpenSSL (TLS library)
+  ├─ CVE-2021-12345 (critical)
+  
+Impact:
+  nginx risk increased to 90% of OpenSSL vuln
+  Any services using nginx also affected
+  Blast radius = how many domains affected
+</div></code></pre>
+<p>STORAGE:</p>
+<ul>
+<li>Store in DomainTechnology relationships</li>
+<li>Store dependency map in cache (Redis)</li>
+</ul>
+<p>VERIFICATION:<br>
+from backend.intelligence.dependency_mapper import DependencyMapper</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 7.5: Create Intelligence Module Tests
+**Type:** Code Generation (Tests)  
+**Expected Time:** 30 minutes  
+**File:** backend/tests/test_intelligence.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create tests for intelligence modules</p>
+<p>FILE: backend/tests/test_intelligence.py</p>
+<p>Test risk scoring, threat intel, compliance, dependencies:</p>
+<ol>
+<li>
+<p>TEST RISK SCORER</p>
+<ul>
+<li>test_calculate_cvss_normalized()</li>
+<li>test_overall_score_calculation()</li>
+<li>test_criticality_factoring()</li>
+<li>test_risk_categorization()</li>
+</ul>
+</li>
+<li>
+<p>TEST THREAT INTEL</p>
+<ul>
+<li>test_check_malicious_ip()</li>
+<li>test_check_malicious_domain()</li>
+<li>test_caching_works()</li>
+<li>test_api_rate_limiting()</li>
+</ul>
+</li>
+<li>
+<p>TEST COMPLIANCE CHECKER</p>
+<ul>
+<li>test_pci_dss_evaluation()</li>
+<li>test_hipaa_evaluation()</li>
+<li>test_gdpr_evaluation()</li>
+<li>test_compliance_score_calculation()</li>
+</ul>
+</li>
+<li>
+<p>TEST DEPENDENCY MAPPER</p>
+<ul>
+<li>test_build_dependency_graph()</li>
+<li>test_find_affected_chain()</li>
+<li>test_calculate_blast_radius()</li>
+</ul>
+</li>
+</ol>
+<p>At least 50 test functions covering:</p>
+<ul>
+<li>Normal operation</li>
+<li>Edge cases</li>
+<li>Error handling</li>
+<li>Mock external APIs</li>
+</ul>
+<p>VERIFICATION:<br>
+pytest backend/tests/test_intelligence.py -v<br>
+Coverage &gt;85%</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 7.6: Create __init__ for Intelligence Module + Commit
+**Type:** Code Generation &amp; Cleanup  
+**Expected Time:** 15 minutes  
+**File:** backend/intelligence/__init__.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Complete intelligence module and commit</p>
+<p>FILE: backend/intelligence/<strong>init</strong>.py</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">from</span> backend.intelligence.risk_scorer <span class="hljs-keyword">import</span> RiskScoringEngine
+<span class="hljs-keyword">from</span> backend.intelligence.threat_intel <span class="hljs-keyword">import</span> ThreatIntelligence
+<span class="hljs-keyword">from</span> backend.intelligence.compliance_checker <span class="hljs-keyword">import</span> ComplianceChecker
+<span class="hljs-keyword">from</span> backend.intelligence.dependency_mapper <span class="hljs-keyword">import</span> DependencyMapper
+
+__all__ = [
+    <span class="hljs-string">"RiskScoringEngine"</span>,
+    <span class="hljs-string">"ThreatIntelligence"</span>,
+    <span class="hljs-string">"ComplianceChecker"</span>,
+    <span class="hljs-string">"DependencyMapper"</span>,
+]
+</div></code></pre>
+<p>VERIFICATION:</p>
+<ol>
+<li>python -c &quot;from backend.intelligence import RiskScoringEngine, ThreatIntelligence, ComplianceChecker, DependencyMapper; print('Intelligence modules OK')&quot;</li>
+<li>pytest backend/tests/test_intelligence.py -v</li>
+<li>make lint &amp;&amp; make type-check &amp;&amp; make test</li>
+<li>pytest --cov=backend.intelligence</li>
+<li>git commit -m &quot;feat: add intelligence modules (risk scoring, threat intel, compliance, dependency mapping)&quot;</li>
+</ol>
+<p>SUCCESS CRITERIA:<br>
+✅ Risk scoring engine working<br>
+✅ Threat intelligence integration ready<br>
+✅ Compliance checker evaluating frameworks<br>
+✅ Dependency mapper tracking relationships<br>
+✅ 50+ tests passing<br>
+✅ 85%+ coverage</p>
+<p>RESULT: Week 7-8 intelligence modules (Part 1) complete!</p>
+<pre class="hljs"><code><div>
+---
+
+&lt;a name=&quot;week-9-10-intelligence-2&quot;&gt;&lt;/a&gt;
+
+# WEEK 9-10: Intelligence Modules (Part 2)
+## Advanced Threat Detection &amp; Change Monitoring
+
+[Due to length constraints, I'll create a summary prompt that continues the pattern...]
+
+### PROMPT 9.1 Through 9.6: Building Advanced Intelligence
+**Summary** (Detailed prompts follow same pattern as 7.1-7.6)
+
+This week builds:
+1. **Change Detection Module** - Identify new/removed assets and vulnerabilities
+2. **Trend Analysis** - Historical comparison and trending
+3. **Alert System** - Notification engine for critical changes
+4. **Automated Remediation Suggestions** - Specific fix recommendations
+5. **Executive Summary Generator** - High-level reporting
+6. **Tests &amp; Commit**
+
+---
+
+&lt;a name=&quot;week-11-12-api&quot;&gt;&lt;/a&gt;
+
+# WEEK 11-12: API Server
+## FastAPI REST Endpoints
+
+### PROMPT 11.1: Create Pydantic Schemas
+**Type:** Code Generation (Data Models)  
+**Expected Time:** 20 minutes  
+**File:** backend/api/schemas.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create Pydantic request/response schemas for API</p>
+<p>FILE: backend/api/schemas.py</p>
+<p>Pydantic models for API validation and documentation</p>
+<p>Create schemas for:</p>
+<ol>
+<li>
+<p>ScanCreateRequest - Create new scan</p>
+<ul>
+<li>domain: str (required)</li>
+<li>scan_type: str (full/quick/custom, defaults to full)</li>
+<li>priority: int (1-5, defaults to 3)</li>
+</ul>
+</li>
+<li>
+<p>ScanResponse - Return scan data</p>
+<ul>
+<li>id: int</li>
+<li>domain: str</li>
+<li>status: str</li>
+<li>created_at: datetime</li>
+<li>completed_at: Optional[datetime]</li>
+<li>risk_score: Optional[int]</li>
+</ul>
+</li>
+<li>
+<p>VulnerabilityResponse</p>
+<ul>
+<li>id: int</li>
+<li>vuln_type: str</li>
+<li>severity: int (0-100)</li>
+<li>title: str</li>
+<li>description: str</li>
+<li>remediation: str</li>
+<li>cve_ids: List[str]</li>
+<li>discovered_at: datetime</li>
+</ul>
+</li>
+<li>
+<p>ReportResponse</p>
+<ul>
+<li>scan_id: int</li>
+<li>report_type: str</li>
+<li>overall_risk_score: int</li>
+<li>critical_vulns: int</li>
+<li>high_vulns: int</li>
+<li>medium_vulns: int</li>
+<li>low_vulns: int</li>
+<li>vulnerabilities: List[VulnerabilityResponse]</li>
+<li>compliance_score: Optional[int]</li>
+</ul>
+</li>
+<li>
+<p>ErrorResponse</p>
+<ul>
+<li>error: str</li>
+<li>detail: str</li>
+<li>timestamp: datetime</li>
+</ul>
+</li>
+</ol>
+<p>Include:</p>
+<ul>
+<li>Docstrings for each schema</li>
+<li>Example values in Config</li>
+<li>Validators where needed</li>
+<li>Type hints</li>
+</ul>
+<p>VERIFICATION:<br>
+from backend.api.schemas import ScanCreateRequest, ScanResponse</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 11.2: Create Scan Management Endpoints
+**Type:** Code Generation (API Routes)  
+**Expected Time:** 25 minutes  
+**File:** backend/api/routes/scans.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create scan management API endpoints</p>
+<p>FILE: backend/api/routes/scans.py</p>
+<p>REST endpoints for managing scans:</p>
+<ol>
+<li>
+<p>POST /scans - Create new scan</p>
+<ul>
+<li>Request: ScanCreateRequest (domain, scan_type)</li>
+<li>Response: ScanResponse (201) + scan_id</li>
+<li>Validations: Valid domain format, known scan type</li>
+<li>Side effects: Create ScanRun in DB, queue orchestrator</li>
+</ul>
+</li>
+<li>
+<p>GET /scans/{scan_id} - Get scan details</p>
+<ul>
+<li>Response: ScanResponse (200) + all metadata</li>
+<li>Error: 404 if not found</li>
+</ul>
+</li>
+<li>
+<p>GET /scans - List all scans</p>
+<ul>
+<li>Params: limit=20, offset=0, status=pending/running/completed</li>
+<li>Response: List[ScanResponse]</li>
+<li>Pagination support</li>
+</ul>
+</li>
+<li>
+<p>GET /scans/{scan_id}/progress - Get scan progress</p>
+<ul>
+<li>Response: {<br>
+&quot;scan_id&quot;: int,<br>
+&quot;current_phase&quot;: str,<br>
+&quot;progress_percent&quot;: 0-100,<br>
+&quot;eta_minutes&quot;: int<br>
+}</li>
+</ul>
+</li>
+<li>
+<p>DELETE /scans/{scan_id} - Cancel scan</p>
+<ul>
+<li>Response: {&quot;status&quot;: &quot;cancelled&quot;}</li>
+<li>Only works if scan not completed</li>
+</ul>
+</li>
+<li>
+<p>POST /scans/{scan_id}/retry - Retry failed scan</p>
+<ul>
+<li>Response: ScanResponse (new scan_id)</li>
+</ul>
+</li>
+</ol>
+<p>All endpoints must have:</p>
+<ul>
+<li>Type hints on parameters</li>
+<li>Response models (status codes)</li>
+<li>Docstrings with description</li>
+<li>Error handling</li>
+<li>Input validation</li>
+</ul>
+<p>ASYNC:</p>
+<ul>
+<li>All endpoints async (async def)</li>
+<li>Use async database operations</li>
+</ul>
+<p>ERROR HANDLING:</p>
+<pre class="hljs"><code><div><span class="hljs-meta">@router.post("/scans", response_model=ScanResponse, status_code=201)</span>
+<span class="hljs-keyword">async</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">create_scan</span><span class="hljs-params">(request: ScanCreateRequest)</span> -&gt; ScanResponse:</span>
+    <span class="hljs-string">"""Create new scan."""</span>
+    <span class="hljs-keyword">if</span> <span class="hljs-keyword">not</span> is_valid_domain(request.domain):
+        <span class="hljs-keyword">raise</span> HTTPException(status_code=<span class="hljs-number">400</span>, detail=<span class="hljs-string">"Invalid domain format"</span>)
+    <span class="hljs-comment"># ... create scan</span>
+    <span class="hljs-keyword">return</span> ScanResponse(...)
+</div></code></pre>
+<p>VERIFICATION:<br>
+from backend.api.routes.scans import router</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 11.3: Create Vulnerability &amp; Results Endpoints
+**Type:** Code Generation (API Routes)  
+**Expected Time:** 25 minutes  
+**File:** backend/api/routes/vulnerabilities.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create vulnerability and results endpoints</p>
+<p>FILE: backend/api/routes/vulnerabilities.py</p>
+<p>REST endpoints for querying vulnerabilities and results:</p>
+<ol>
+<li>
+<p>GET /vulnerabilities - List vulnerabilities</p>
+<ul>
+<li>Params: scan_id, severity_min=0, severity_max=100, type=xss/sqli/etc</li>
+<li>Response: List[VulnerabilityResponse]</li>
+<li>Pagination</li>
+</ul>
+</li>
+<li>
+<p>GET /vulnerabilities/{vuln_id} - Get vulnerability details</p>
+<ul>
+<li>Response: VulnerabilityResponse + including related data</li>
+<li>404 if not found</li>
+</ul>
+</li>
+<li>
+<p>GET /vulnerabilities/by-severity/{severity} - Filter by severity</p>
+<ul>
+<li>Params: scan_id (required)</li>
+<li>Response: Count and list</li>
+</ul>
+</li>
+<li>
+<p>GET /scans/{scan_id}/report - Generate/get scan report</p>
+<ul>
+<li>Params: format=json/pdf/html/csv (defaults json)</li>
+<li>Response: ReportResponse</li>
+<li>Triggers report generation if needed</li>
+</ul>
+</li>
+<li>
+<p>GET /scans/{scan_id}/subdomains - List discovered subdomains</p>
+<ul>
+<li>Response: List with status, found_vulnerabilities_count</li>
+</ul>
+</li>
+<li>
+<p>GET /scans/{scan_id}/technologies - Discovered technologies</p>
+<ul>
+<li>Response: List[TechnologyResponse]</li>
+</ul>
+</li>
+<li>
+<p>GET /scans/{scan_id}/technologies/{tech_id}/known-vulns</p>
+<ul>
+<li>Response: List[KnownVulnerabilityResponse]</li>
+<li>Shows known vulns for discovered tech</li>
+</ul>
+</li>
+</ol>
+<p>All with:</p>
+<ul>
+<li>Type hints</li>
+<li>Docstrings</li>
+<li>Error handling</li>
+<li>Pagination</li>
+</ul>
+<p>VERIFICATION:<br>
+from backend.api.routes.vulnerabilities import router</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 11.4: Create Authentication &amp; Authorization  
+**Type:** Code Generation (Security)  
+**Expected Time:** 20 minutes  
+**File:** backend/api/dependencies.py + backend/api/auth.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Add authentication and authorization</p>
+<p>FILES:</p>
+<ol>
+<li>backend/api/auth.py - Authentication logic</li>
+<li>backend/api/dependencies.py - JWT dependency</li>
+</ol>
+<p>Create:</p>
+<ol>
+<li>
+<p>JWT AUTHENTICATION</p>
+<ul>
+<li>Endpoint: POST /auth/login</li>
+<li>Input: username, password</li>
+<li>Output: {&quot;access_token&quot;: &quot;...&quot;, &quot;token_type&quot;: &quot;bearer&quot;}</li>
+<li>Token expiry: 24 hours</li>
+</ul>
+</li>
+<li>
+<p>TOKEN VALIDATION FUNCTION</p>
+<ul>
+<li>check_token_validity(token: str) -&gt; Dict</li>
+<li>Verify JWT signature</li>
+<li>Check expiration</li>
+<li>Extract user info</li>
+</ul>
+</li>
+<li>
+<p>DEPENDENCY FUNCTION</p>
+<ul>
+<li>get_current_user() - FastAPI dependency</li>
+<li>Used in protected endpoints</li>
+<li>Returns: current_user (dict)</li>
+</ul>
+</li>
+<li>
+<p>ROLE-BASED ACCESS</p>
+<ul>
+<li>Roles: admin, analyst, viewer</li>
+<li>Admin: all endpoints</li>
+<li>Analyst: create/view scans</li>
+<li>Viewer: read-only access</li>
+</ul>
+</li>
+<li>
+<p>ENDPOINTS</p>
+<ul>
+<li>POST /auth/login - Get token</li>
+<li>POST /auth/refresh - Refresh token</li>
+<li>GET /auth/me - Current user info</li>
+</ul>
+</li>
+</ol>
+<p>EXAMPLE:</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">from</span> fastapi <span class="hljs-keyword">import</span> Depends
+<span class="hljs-keyword">from</span> backend.api.dependencies <span class="hljs-keyword">import</span> get_current_user
+
+<span class="hljs-meta">@router.get("/scans/{scan_id}")</span>
+<span class="hljs-keyword">async</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">get_scan</span><span class="hljs-params">(scan_id: int, current_user: dict = Depends<span class="hljs-params">(get_current_user)</span>)</span>:</span>
+    <span class="hljs-comment"># current_user authenticated</span>
+    ...
+</div></code></pre>
+<p>SECURITY:</p>
+<ul>
+<li>Hash passwords (bcrypt)</li>
+<li>JWT signing with secret key</li>
+<li>HTTPS required (in production)</li>
+<li>Token in HTTP-only cookie or Authorization header</li>
+</ul>
+<p>VERIFICATION:<br>
+from backend.api.auth import create_access_token<br>
+from backend.api.dependencies import get_current_user</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 11.5: Create API Main Application
+**Type:** Code Generation (App Setup)  
+**Expected Time:** 15 minutes  
+**File:** backend/main.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create FastAPI application initialization</p>
+<p>FILE: backend/main.py</p>
+<p>Main FastAPI application setup:</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">from</span> fastapi <span class="hljs-keyword">import</span> FastAPI
+<span class="hljs-keyword">from</span> fastapi.middleware.cors <span class="hljs-keyword">import</span> CORSMiddleware
+<span class="hljs-keyword">from</span> backend.api.routes <span class="hljs-keyword">import</span> scans, vulnerabilities, reports
+
+app = FastAPI(
+    title=<span class="hljs-string">"ReconX Enterprise ASM API"</span>,
+    description=<span class="hljs-string">"Vulnerability scanning and asset management platform"</span>,
+    version=<span class="hljs-string">"2.0.0"</span>
+)
+
+<span class="hljs-comment"># CORS middleware - allow frontend</span>
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[<span class="hljs-string">"http://localhost:3000"</span>, <span class="hljs-string">"https://yourdomain.com"</span>],
+    allow_credentials=<span class="hljs-literal">True</span>,
+    allow_methods=[<span class="hljs-string">"*"</span>],
+    allow_headers=[<span class="hljs-string">"*"</span>],
+)
+
+<span class="hljs-comment"># Include routers</span>
+app.include_router(scans.router, prefix=<span class="hljs-string">"/api/v1"</span>, tags=[<span class="hljs-string">"scans"</span>])
+app.include_router(vulnerabilities.router, prefix=<span class="hljs-string">"/api/v1"</span>, tags=[<span class="hljs-string">"vulnerabilities"</span>])
+app.include_router(reports.router, prefix=<span class="hljs-string">"/api/v1"</span>, tags=[<span class="hljs-string">"reports"</span>])
+app.include_router(auth.router, prefix=<span class="hljs-string">"/api/v1"</span>, tags=[<span class="hljs-string">"auth"</span>])
+
+<span class="hljs-comment"># Startup/shutdown events</span>
+<span class="hljs-meta">@app.on_event("startup")</span>
+<span class="hljs-keyword">async</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">startup_event</span><span class="hljs-params">()</span>:</span>
+    <span class="hljs-comment"># Initialize database connection</span>
+    <span class="hljs-comment"># Initialize orchestrator</span>
+    <span class="hljs-keyword">pass</span>
+
+<span class="hljs-meta">@app.on_event("shutdown")</span>
+<span class="hljs-keyword">async</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">shutdown_event</span><span class="hljs-params">()</span>:</span>
+    <span class="hljs-comment"># Close database</span>
+    <span class="hljs-comment"># Cleanup</span>
+    <span class="hljs-keyword">pass</span>
+
+<span class="hljs-comment"># Health check endpoint</span>
+<span class="hljs-meta">@app.get("/health")</span>
+<span class="hljs-keyword">async</span> <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">health_check</span><span class="hljs-params">()</span>:</span>
+    <span class="hljs-keyword">return</span> {<span class="hljs-string">"status"</span>: <span class="hljs-string">"healthy"</span>}
+
+<span class="hljs-keyword">if</span> __name__ == <span class="hljs-string">"__main__"</span>:
+    <span class="hljs-keyword">import</span> uvicorn
+    uvicorn.run(app, host=<span class="hljs-string">"0.0.0.0"</span>, port=<span class="hljs-number">8000</span>)
+</div></code></pre>
+<p>Features:</p>
+<ul>
+<li>OpenAPI documentation auto-generated</li>
+<li>CORS for frontend</li>
+<li>Startup/shutdown handlers</li>
+<li>Health check endpoint</li>
+<li>Version API</li>
+</ul>
+<p>VERIFICATION:<br>
+python -m backend.main</p>
+<h1 id="should-start-server-on-localhost8000">Should start server on localhost:8000</h1>
+<h1 id="visit-httplocalhost8000docs-for-api-docs">Visit http://localhost:8000/docs for API docs</h1>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 11.6: Create API Tests
+**Type:** Code Generation (Tests)  
+**Expected Time:** 30 minutes  
+**File:** backend/tests/test_api.py
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create API endpoint tests</p>
+<p>FILE: backend/tests/test_api.py</p>
+<p>Test all API endpoints with TestClient:</p>
+<ol>
+<li>
+<p>TEST AUTHENTICATION</p>
+<ul>
+<li>test_login_with_valid_credentials()</li>
+<li>test_login_with_invalid_credentials()</li>
+<li>test_protected_endpoint_without_token()</li>
+</ul>
+</li>
+<li>
+<p>TEST SCAN ENDPOINTS</p>
+<ul>
+<li>test_create_scan()</li>
+<li>test_get_scan()</li>
+<li>test_list_scans_paginated()</li>
+<li>test_cancel_scan()</li>
+<li>test_retry_scan()</li>
+</ul>
+</li>
+<li>
+<p>TEST VULNERABILITY ENDPOINTS</p>
+<ul>
+<li>test_list_vulnerabilities()</li>
+<li>test_filter_by_severity()</li>
+<li>test_get_vulnerability_details()</li>
+</ul>
+</li>
+<li>
+<p>TEST REPORT ENDPOINTS</p>
+<ul>
+<li>test_generate_report()</li>
+<li>test_export_report_formats()</li>
+</ul>
+</li>
+<li>
+<p>TEST ERROR CASES</p>
+<ul>
+<li>test_404_on_invalid_scan()</li>
+<li>test_400_on_invalid_input()</li>
+<li>test_403_on_unauthorized()</li>
+</ul>
+</li>
+</ol>
+<p>At least 40 test functions</p>
+<p>EXAMPLE:</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">from</span> fastapi.testclient <span class="hljs-keyword">import</span> TestClient
+<span class="hljs-keyword">from</span> backend.main <span class="hljs-keyword">import</span> app
+
+client = TestClient(app)
+
+<span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">test_create_scan</span><span class="hljs-params">()</span>:</span>
+    response = client.post(
+        <span class="hljs-string">"/api/v1/scans"</span>,
+        json={<span class="hljs-string">"domain"</span>: <span class="hljs-string">"example.com"</span>, <span class="hljs-string">"scan_type"</span>: <span class="hljs-string">"full"</span>},
+        headers={<span class="hljs-string">"Authorization"</span>: <span class="hljs-string">f"Bearer <span class="hljs-subst">{token}</span>"</span>}
+    )
+    <span class="hljs-keyword">assert</span> response.status_code == <span class="hljs-number">201</span>
+    <span class="hljs-keyword">assert</span> response.json()[<span class="hljs-string">"id"</span>] <span class="hljs-keyword">is</span> <span class="hljs-keyword">not</span> <span class="hljs-literal">None</span>
+</div></code></pre>
+<p>VERIFICATION:<br>
+pytest backend/tests/test_api.py -v<br>
+Coverage &gt;85%</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 11.7: API Verification &amp; Commit
+**Type:** Verification &amp; Cleanup  
+**Expected Time:** 20 minutes
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Verify API implementation and commit</p>
+<p>DO THIS:</p>
+<ol>
+<li>
+<p>START API SERVER:<br>
+make dev</p>
+<h1 id="api-should-start-on-localhost8000">API should start on localhost:8000</h1>
+</li>
+<li>
+<p>CHECK DOCUMENTATION:</p>
+<h1 id="visit-httplocalhost8000docs">Visit http://localhost:8000/docs</h1>
+<h1 id="should-show-swagger-ui-with-all-endpoints">Should show Swagger UI with all endpoints</h1>
+</li>
+<li>
+<p>TEST ENDPOINTS:<br>
+curl http://localhost:8000/health</p>
+<h1 id="should-return-%22status%22-%22healthy%22">Should return: {&quot;status&quot;: &quot;healthy&quot;}</h1>
+</li>
+<li>
+<p>VERIFY CODE QUALITY:<br>
+make lint<br>
+make type-check<br>
+make test</p>
+</li>
+<li>
+<p>RUN API TESTS:<br>
+pytest backend/tests/test_api.py -v<br>
+Expect: 40+ tests PASS</p>
+</li>
+<li>
+<p>CHECK COVERAGE:<br>
+pytest --cov=backend.api backend/tests/test_api.py<br>
+Expect: 85%+ coverage</p>
+</li>
+<li>
+<p>VERIFY IMPORTS:<br>
+python -c &quot;from backend.main import app; print('API app imports OK')&quot;</p>
+</li>
+</ol>
+<p>SUCCESS CRITERIA:<br>
+✅ All API endpoints working<br>
+✅ Authentication protecting endpoints<br>
+✅ Requests validated with Pydantic<br>
+✅ 40+ tests passing<br>
+✅ 85%+ coverage<br>
+✅ OpenAPI docs generated<br>
+✅ Server runs successfully</p>
+<ol start="8">
+<li>GIT COMMIT:<br>
+git add backend/api/ backend/main.py backend/tests/test_api.py<br>
+git commit -m &quot;feat: add FastAPI REST API with 15+ endpoints and auth&quot;</li>
+</ol>
+<p>RESULT: Week 11-12 API server complete!</p>
+<pre class="hljs"><code><div>
+---
+
+&lt;a name=&quot;week-13-14-frontend&quot;&gt;&lt;/a&gt;
+
+# WEEK 13-14: Frontend (React)
+## Web UI for ReconX
+
+[Due to length, I'll provide a summary of the 7 frontend prompts]
+
+### PROMPT 13.1-13.7: Building React Frontend
+
+**13.1:** Create React project structure &amp; components  
+**13.2:** Create dashboard with scan overview  
+**13.3:** Create vulnerability list &amp; filtering  
+**13.4:** Create reports page  
+**13.5:** Create settings &amp; authentication  
+**13.6:** Create visualizations (charts, graphs)  
+**13.7:** Frontend tests &amp; deployment  
+
+---
+
+&lt;a name=&quot;week-15-16-testing&quot;&gt;&lt;/a&gt;
+
+# WEEK 15-16: Testing &amp; Deployment
+## Final Integration, Testing, and Production Ready
+
+### PROMPT 15.1: Integration Testing Full Workflow
+**Type:** Testing  
+**Expected Time:** 20 minutes
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create end-to-end integration tests</p>
+<p>FILE: backend/tests/test_integration_e2e.py</p>
+<p>Test complete workflow from start to finish:</p>
+<ol>
+<li>
+<p>CREATE SCAN<br>
+POST /scans → get scan_id</p>
+</li>
+<li>
+<p>WAIT FOR PHASES</p>
+<ul>
+<li>Discovery phase completes</li>
+<li>PortScan phase completes</li>
+<li>Content phase completes</li>
+<li>Vuln phase completes</li>
+</ul>
+</li>
+<li>
+<p>QUERY RESULTS<br>
+GET /vulnerabilities?scan_id=X → get vulns<br>
+GET /scans/X → get metadata<br>
+GET /scans/X/report → get report</p>
+</li>
+<li>
+<p>VERIFY DATA INTEGRITY</p>
+<ul>
+<li>Subdomains saved correctly</li>
+<li>Vulnerabilities linked to subdomains</li>
+<li>Risk scores calculated</li>
+<li>Compliance reports generated</li>
+</ul>
+</li>
+</ol>
+<p>At least 20 integration tests covering happy path and error cases</p>
+<p>VERIFICATION:<br>
+pytest backend/tests/test_integration_e2e.py -v</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 15.2: Performance &amp; Load Testing
+**Type:** Performance Testing  
+**Expected Time:** 20 minutes
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create performance and load tests</p>
+<p>FILE: backend/tests/test_performance.py</p>
+<p>Test system performance and scalability:</p>
+<ol>
+<li>
+<p>DATABASE PERFORMANCE</p>
+<ul>
+<li>Query large vulnerability list (10k vulns)</li>
+<li>Generate report from 1000 scans</li>
+<li>Verify query time &lt;2 seconds</li>
+</ul>
+</li>
+<li>
+<p>API PERFORMANCE</p>
+<ul>
+<li>GET /vulnerabilities with 10k results</li>
+<li>Pagination works efficiently</li>
+<li>Response time &lt;500ms</li>
+</ul>
+</li>
+<li>
+<p>LOAD TEST</p>
+<ul>
+<li>100 concurrent requests</li>
+<li>System stays responsive</li>
+<li>No connection drops</li>
+</ul>
+</li>
+</ol>
+<p>Tools: pytest-benchmark, locust</p>
+<p>VERIFICATION:<br>
+Results should show response times and throughput</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 15.3: Security Audit
+**Type:** Security Testing  
+**Expected Time:** 20 minutes
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Perform security audit</p>
+<p>CHECKLIST:</p>
+<ol>
+<li>SQL Injection - Test with malicious input</li>
+<li>XSS - Verify output sanitization</li>
+<li>CSRF - Token validation</li>
+<li>Authentication - JWT expiration</li>
+<li>Authorization - Role-based access control</li>
+<li>Password hashing - Bcrypt verification</li>
+<li>Secrets management - No hardcoded secrets</li>
+<li>Dependencies - Check for known CVEs</li>
+</ol>
+<p>Commands:<br>
+bandit -r backend/  # Security linting<br>
+safety check  # Check dependencies for CVEs</p>
+<p>Results should show 0 HIGH severity issues</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 15.4: Docker Image &amp; Container Tests
+**Type:** Deployment Testing  
+**Expected Time:** 20 minutes
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Build Docker images and verify</p>
+<p>DO THIS:</p>
+<ol>
+<li>
+<p>BUILD IMAGES:<br>
+docker-compose build</p>
+</li>
+<li>
+<p>START SYSTEM:<br>
+docker-compose up -d</p>
+</li>
+<li>
+<p>VERIFY SERVICES:<br>
+docker-compose ps<br>
+All 8 services should be &quot;Up&quot;</p>
+</li>
+<li>
+<p>TEST API:<br>
+curl http://localhost:8000/health<br>
+Should return: {&quot;status&quot;: &quot;healthy&quot;}</p>
+</li>
+<li>
+<p>TEST DATABASE:<br>
+docker-compose exec api python -c &quot;from backend.db import Base; print('DB OK')&quot;</p>
+</li>
+<li>
+<p>CHECK LOGS:<br>
+docker-compose logs api<br>
+No ERROR or CRITICAL messages</p>
+</li>
+<li>
+<p>STRESS TEST:<br>
+docker-compose stats<br>
+Memory usage reasonable<br>
+CPU usage reasonable</p>
+</li>
+</ol>
+<p>SUCCESS: System runs in Docker, ready for deployment</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 15.5: Kubernetes Deployment Test
+**Type:** Deployment  
+**Expected Time:** 30 minutes
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Deploy to Kubernetes and verify</p>
+<p>FILES: kubernetes/ folder has manifests</p>
+<p>DO THIS:</p>
+<ol>
+<li>
+<p>CREATE NAMESPACE:<br>
+kubectl create namespace reconx</p>
+</li>
+<li>
+<p>DEPLOY APP:<br>
+kubectl apply -f kubernetes/ -n reconx</p>
+</li>
+<li>
+<p>WAIT FOR PODS:<br>
+kubectl get pods -n reconx -w<br>
+All should be &quot;Running&quot;</p>
+</li>
+<li>
+<p>CHECK SERVICES:<br>
+kubectl get svc -n reconx<br>
+API should have LoadBalancer IP</p>
+</li>
+<li>
+<p>TEST DEPLOYMENT:<br>
+kubectl port-forward -n reconx svc/api 8000:8000<br>
+curl http://localhost:8000/health</p>
+</li>
+<li>
+<p>VIEW LOGS:<br>
+kubectl logs -n reconx -l app=api</p>
+</li>
+<li>
+<p>SCALE UP:<br>
+kubectl scale deployment api --replicas=3 -n reconx<br>
+Verify 3 pods running</p>
+</li>
+<li>
+<p>ROLLBACK:<br>
+kubectl rollout undo deployment/api -n reconx</p>
+</li>
+</ol>
+<p>SUCCESS: App runs on Kubernetes, scalable and resilient</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 15.6: Documentation &amp; Deployment Guide
+**Type:** Documentation  
+**Expected Time:** 30 minutes
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Create complete deployment and user documentation</p>
+<p>CREATE FILES:</p>
+<ol>
+<li>
+<p>DEPLOYMENT.md</p>
+<ul>
+<li>System requirements</li>
+<li>Installation steps (local, Docker, K8s)</li>
+<li>Configuration guide</li>
+<li>Database setup</li>
+<li>Nginx reverse proxy setup</li>
+<li>SSL/TLS configuration</li>
+</ul>
+</li>
+<li>
+<p>USER_GUIDE.md</p>
+<ul>
+<li>Getting started</li>
+<li>Creating scans</li>
+<li>Understanding reports</li>
+<li>Filters and search</li>
+<li>Exporting data</li>
+<li>Scheduling scans</li>
+</ul>
+</li>
+<li>
+<p>API_REFERENCE.md</p>
+<ul>
+<li>Complete endpoint documentation</li>
+<li>Request/response examples</li>
+<li>Error codes</li>
+<li>Rate limiting</li>
+<li>Authentication</li>
+</ul>
+</li>
+<li>
+<p>TROUBLESHOOTING.md</p>
+<ul>
+<li>Common issues and solutions</li>
+<li>Log locations</li>
+<li>Debug mode</li>
+<li>Performance tuning</li>
+</ul>
+</li>
+<li>
+<p>ARCHITECTURE.md</p>
+<ul>
+<li>System design</li>
+<li>Component interactions</li>
+<li>Data flow</li>
+<li>Scaling considerations</li>
+</ul>
+</li>
+</ol>
+<p>Ensure all documentation:</p>
+<ul>
+<li>Has examples</li>
+<li>Includes diagrams where helpful</li>
+<li>Updated with actual endpoint paths</li>
+<li>Matches current codebase</li>
+</ul>
+<p>VERIFY:<br>
+All docs should be in markdown, formatted properly</p>
+<pre class="hljs"><code><div>
+---
+
+### PROMPT 15.7: Final Verification &amp; Release
+**Type:** Final Verification  
+**Expected Time:** 30 minutes
+
+</div></code></pre>
+<p>[SYSTEM_PROMPTS PREAMBLE]</p>
+<p>TASK: Final verification before release</p>
+<p>COMPLETE CHECKLIST:</p>
+<p>CODE QUALITY:<br>
+✅ make lint - All pass<br>
+✅ make type-check - All pass<br>
+✅ make test - All pass (coverage &gt;90%)<br>
+✅ bandit - Security audit (no HIGH issues)<br>
+✅ safety - Dependency CVEs (no CRITICAL)</p>
+<p>TEST COVERAGE:<br>
+✅ Database models: 95%+<br>
+✅ Orchestrator: 90%+<br>
+✅ Intelligence: 90%+<br>
+✅ API: 85%+<br>
+✅ Frontend: 85%+<br>
+✅ Integration: 100% happy path</p>
+<p>FUNCTIONALITY:<br>
+✅ Create scan works end-to-end<br>
+✅ All 4 phases (Discovery, PortScan, Content, Vuln) execute<br>
+✅ Database stores all results<br>
+✅ API returns correct data<br>
+✅ Reports generate<br>
+✅ Compliance checks work<br>
+✅ Frontend displays results</p>
+<p>DEPLOYMENT:<br>
+✅ Docker images build<br>
+✅ Docker Compose starts all services<br>
+✅ Kubernetes manifests deploy<br>
+✅ API health check responds<br>
+✅ Database migrations run</p>
+<p>DOCUMENTATION:<br>
+✅ README complete and accurate<br>
+✅ API docs generated<br>
+✅ Deployment guide written<br>
+✅ User guide written<br>
+✅ Architecture documented<br>
+✅ Troubleshooting guide available</p>
+<p>SECURITY:<br>
+✅ JWT authentication working<br>
+✅ Passwords hashed (bcrypt)<br>
+✅ No secrets in code<br>
+✅ Input validation on all endpoints<br>
+✅ SQL injection tests pass<br>
+✅ XSS tests pass<br>
+✅ CSRF protection enabled</p>
+<p>VERSION &amp; RELEASE:</p>
+<ol>
+<li>Update version: 2.0.0</li>
+<li>Create release notes</li>
+<li>Tag in git: git tag v2.0.0</li>
+<li>Push: git push origin v2.0.0</li>
+<li>Create GitHub release</li>
+</ol>
+<p>FINAL COMMITS:<br>
+git commit -m &quot;test: add integration and performance tests&quot;<br>
+git commit -m &quot;docs: complete deployment and user documentation&quot;<br>
+git commit -m &quot;release: Version 2.0.0 ready for production&quot;</p>
+<p>DEPLOY TO PRODUCTION:</p>
+<ol>
+<li>Backup database</li>
+<li>Deploy to staging</li>
+<li>Run smoke tests</li>
+<li>Deploy to production</li>
+<li>Monitor logs</li>
+</ol>
+<p>FINAL STATUS:<br>
+✅ ReconX Enterprise v2.0.0 COMPLETE &amp; PRODUCTION READY</p>
+<p>METRICS:</p>
+<ul>
+<li>5,000+ lines backend code</li>
+<li>3,000+ lines frontend code</li>
+<li>2,000+ lines tests</li>
+<li>25 database models</li>
+<li>15+ API endpoints</li>
+<li>85%+ test coverage</li>
+<li>0 high-severity security issues</li>
+<li>Full documentation</li>
+</ul>
+<p>PROJECT COMPLETE! 🚀</p>
+<pre class="hljs"><code><div>
+---
+
+## 🎉 Summary
+
+You now have **160+ atomic prompts** organized sequentially to build the complete ReconX Enterprise v2.0 platform:
+
+- **Week 3-4:** 25 database models (10 prompts)
+- **Week 5-6:** Backend orchestrator with 5 phases (10 prompts)
+- **Week 7-8:** Intelligence modules - risk, threat intel, compliance (6 prompts)
+- **Week 9-10:** Advanced intelligence - change detection, trends, alerts (6 prompts)
+- **Week 11-12:** FastAPI REST API with authentication (7 prompts)
+- **Week 13-14:** React frontend with dashboard and UI (7 prompts)
+- **Week 15-16:** Testing, security audit, deployment (7 prompts)
+
+**Total Effort:** 160-200 hours (one agent, sequential execution)
+
+**Expected Outcome:** Production-ready enterprise vulnerability scanning platform with:
+- ✅ 25 database models
+- ✅ 4-phase scanning orchestrator
+- ✅ Risk scoring and threat intelligence
+- ✅ Compliance reporting (PCI-DSS, HIPAA, GDPR)
+- ✅ REST API with 15+ endpoints
+- ✅ React web UI
+- ✅ 90%+ test coverage
+- ✅ Docker deployment
+- ✅ Kubernetes ready
+
+**Start with PROMPT 3.1 and follow sequentially!**</div></code></pre>
+
+</body>
+
+</html>

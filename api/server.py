@@ -1,131 +1,109 @@
 """
-ReconX API Server v2.0
-Serves REST API and static web UI with FireCompass-style dashboard.
-Run from project root: uvicorn api.server:app --host 0.0.0.0 --port 8000
+ReconX API Server — compatibility shim.
+
+The canonical server implementation is in backend/api/server.py.
+This module re-exports that app and adds web-UI (static file) routes so that
+the original launch command still works:
+
+    uvicorn api.server:app --host 0.0.0.0 --port 8000
+
+All API routes, authentication, rate limiting, and CSRF protection are
+inherited from the canonical backend app.
 """
 
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-# Project root (parent of api/)
+# Re-export the canonical, fully-featured application.
+from app.api.server import app  # noqa: F401
+
+# ─── Static web-UI routes ───────────────────────────────────────────────────
+
 ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = ROOT / "web" / "static"
 ASSETS_DIR = STATIC_DIR / "assets"
 
-app = FastAPI(
-    title="ReconX Enterprise API",
-    version="2.0",
-    description="Attack Surface Management Platform",
-)
 
-# CORS — allow dashboard on same origin + dev servers
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ─── API Routes ────────────────────────────────────────────────────────────────
-from api.routes import scans, assets, findings, stream  # noqa: E402
-
-app.include_router(scans.router, prefix="/api/v1")
-app.include_router(assets.router, prefix="/api/v1")
-app.include_router(findings.router, prefix="/api/v1")
-app.include_router(stream.router, prefix="/api/v1")
-
-
-# ─── Health ────────────────────────────────────────────────────────────────────
-@app.get("/api/health")
-async def health():
-    return {"status": "ok", "service": "reconx-api", "version": "2.0"}
-
-
-# ─── Page Routes ───────────────────────────────────────────────────────────────
 def _serve(filename: str):
-    """Return an HTML page or JSON fallback."""
+    """Return a static HTML page, or a JSON fallback if the file is missing."""
     p = STATIC_DIR / filename
     if p.exists():
         return FileResponse(p, media_type="text/html")
     return {"message": "ReconX API", "docs": "/docs"}
 
 
-@app.get("/")
-@app.get("/dashboard")
+@app.get("/", include_in_schema=False)
+@app.get("/dashboard", include_in_schema=False)
 async def page_dashboard():
     return _serve("index.html")
 
 
-@app.get("/assessments")
+@app.get("/assessments", include_in_schema=False)
 async def page_assessments():
     return _serve("scan_viewer_v2.html")
 
 
-@app.get("/vulnerabilities")
+@app.get("/vulnerabilities", include_in_schema=False)
 async def page_vulnerabilities():
     return _serve("findings_v2.html")
 
 
-@app.get("/graph")
+@app.get("/graph", include_in_schema=False)
 async def page_graph():
     return _serve("graph_viewer_v2.html")
 
 
-@app.get("/attack-surface")
+@app.get("/attack-surface", include_in_schema=False)
 async def page_attack_surface():
     return _serve("attack_surface_v2.html")
 
 
-@app.get("/reports")
+@app.get("/reports", include_in_schema=False)
 async def page_reports():
     return _serve("reports_v2.html")
 
 
-@app.get("/compliance")
+@app.get("/compliance", include_in_schema=False)
 async def page_compliance():
     return _serve("compliance_v2.html")
 
 
-@app.get("/alerts")
+@app.get("/alerts", include_in_schema=False)
 async def page_alerts():
     return _serve("alerts_v2.html")
 
 
-@app.get("/settings")
+@app.get("/settings", include_in_schema=False)
 async def page_settings():
     return _serve("settings_v2.html")
 
 
-@app.get("/threat-intel")
+@app.get("/threat-intel", include_in_schema=False)
 async def page_threat_intel():
     return _serve("scan_viewer_v2.html")
 
 
-# Legacy routes (v1 pages still in web/static/)
-@app.get("/scan_viewer.html")
+# Legacy page routes
+@app.get("/scan_viewer.html", include_in_schema=False)
 async def legacy_scan_viewer():
     return _serve("scan_viewer.html")
 
 
-@app.get("/findings.html")
+@app.get("/findings.html", include_in_schema=False)
 async def legacy_findings():
     return _serve("findings.html")
 
 
-@app.get("/graph_viewer.html")
+@app.get("/graph_viewer.html", include_in_schema=False)
 async def legacy_graph_viewer():
     return _serve("graph_viewer.html")
 
 
-# ─── Static Assets (CSS, JS, images) ──────────────────────────────────────────
-# IMPORTANT: must be mounted AFTER explicit routes so /assets/* doesn't shadow them
+# Static asset files (CSS, JS, images) — mount after explicit routes.
 if ASSETS_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
+    app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 
 
 if __name__ == "__main__":

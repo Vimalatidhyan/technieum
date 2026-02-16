@@ -1,5 +1,10 @@
-# ReconX Enterprise - Docker Compose
-# Usage: from project root: docker compose -f deployment/docker/docker-compose.yml up -d
+# ReconX Enterprise — Docker Compose
+# Usage (from project root):
+#   docker compose -f deployment/docker/docker-compose.yml up -d
+#
+# Profiles:
+#   (default)  api + worker
+#   tools      scanner (one-off CLI scans)
 
 services:
   api:
@@ -16,16 +21,40 @@ services:
       - reconx-data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
-      - RECONX_DB_PATH=/app/data/reconx.db
+      - DATABASE_URL=sqlite:////app/data/reconx.db
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - RECONX_SECRET_KEY=${RECONX_SECRET_KEY:?RECONX_SECRET_KEY must be set}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
-  # Optional: scanner worker (run one-off scans via CLI)
+  worker:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.worker
+    image: reconx-worker:latest
+    container_name: reconx-worker
+    volumes:
+      - ../../output:/app/output
+      - ../../logs:/app/logs
+      - reconx-data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=sqlite:////app/data/reconx.db
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - WORKER_POLL_SEC=${WORKER_POLL_SEC:-5}
+      - WORKER_MAX_JOBS=${WORKER_MAX_JOBS:-2}
+      - RECONX_NUCLEI_UPDATE=${RECONX_NUCLEI_UPDATE:-false}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Optional: scanner CLI (one-off scans)
   scanner:
     build:
       context: ../..
@@ -39,10 +68,10 @@ services:
     profiles:
       - tools
     environment:
-      - RECONX_DB_PATH=/app/data/reconx.db
-    # Only start when explicitly run: docker compose --profile tools run scanner -t example.com
+      - DATABASE_URL=sqlite:////app/data/reconx.db
+      - RECONX_NUCLEI_UPDATE=${RECONX_NUCLEI_UPDATE:-false}
     command: ["--help"]
 
 volumes:
   reconx-data:
-
+    driver: local

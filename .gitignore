@@ -62,8 +62,21 @@ temp/
 # Repo-specific exclusions
 # ==============================================================================
 
-# Subproject with its own tracking
-reconx-enterprise/
+# Archived legacy code (not deleted, just moved)
+# archive/ is committed intentionally
+
+# Test artifacts
+test.db
+/tmp/unref_*.txt
+
+# Alembic
+alembic/versions/*.pyc
+
+# Docker build cache
+.docker/
+
+# CI/CD generated
+.github/workflows/__pycache__/
 
 # Backup & generated docs
 *.bak

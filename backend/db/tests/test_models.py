@@ -11,8 +11,8 @@ import pytest
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session, sessionmaker
 
-from backend.db.base import Base
-from backend.db.models import (
+from app.db.base import Base
+from app.db.models import (
     APIKey,
     AssetChange,
     AssetSnapshot,
