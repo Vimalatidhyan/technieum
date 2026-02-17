@@ -275,39 +275,116 @@ def _parse_nmap_text(nmap_txt: Path, scan_run_id: int, sub_map: dict,
 
 def _parse_nuclei(nuclei_file: Path, scan_run_id: int, sub_map: dict,
                   domain: str, db: Session) -> int:
-    """Parse nuclei JSONL output and insert Vulnerability rows."""
+    """Parse nuclei JSONL *or* JSON array output and insert Vulnerability rows.
+
+    Nuclei >= 3.x outputs one JSON object per line (JSONL).
+    Some older/custom configs output a JSON array.  We handle both.
+    """
     from app.db.models import Vulnerability
     inserted = 0
-    with nuclei_file.open("r", encoding="utf-8", errors="ignore") as fh:
-        for raw in fh:
+    content = nuclei_file.read_text(encoding="utf-8", errors="ignore")
+
+    # Try JSON array first; fall back to JSONL line-by-line
+    items: list = []
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, list):
+            items = parsed
+        elif isinstance(parsed, dict):
+            items = [parsed]
+    except json.JSONDecodeError:
+        for raw in content.splitlines():
             raw = raw.strip()
             if not raw:
                 continue
             try:
-                obj = json.loads(raw)
+                items.append(json.loads(raw))
             except json.JSONDecodeError:
                 continue
-            info = obj.get("info") or {}
-            title = info.get("name") or obj.get("template-id") or "nuclei finding"
-            sev_str = (info.get("severity") or "info").lower()
-            severity = _SEV_MAP.get(sev_str, 1)
-            host_raw = obj.get("host") or obj.get("matched-at") or domain
-            host = re.sub(r"^https?://", "", host_raw).split("/")[0].split(":")[0]
-            description = (info.get("description") or "")[:2000] or None
-            vuln_type = obj.get("template-id") or "nuclei"
-            sub_id = sub_map.get(host) or sub_map.get(domain)
-            db.add(Vulnerability(
-                scan_run_id=scan_run_id,
-                subdomain_id=sub_id,
-                vuln_type=vuln_type,
-                severity=severity,
-                title=title[:255],
-                description=description,
-                discovered_at=datetime.now(timezone.utc),
-                status="open",
-            ))
-            inserted += 1
+
+    for obj in items:
+        info = obj.get("info") or {}
+        title = info.get("name") or obj.get("template-id") or "nuclei finding"
+        sev_str = (info.get("severity") or "info").lower()
+        severity = _SEV_MAP.get(sev_str, 1)
+        host_raw = obj.get("host") or obj.get("matched-at") or domain
+        host = re.sub(r"^https?://", "", host_raw).split("/")[0].split(":")[0]
+        description = (info.get("description") or "")[:2000] or None
+        vuln_type = obj.get("template-id") or "nuclei"
+        sub_id = sub_map.get(host) or sub_map.get(domain)
+        db.add(Vulnerability(
+            scan_run_id=scan_run_id,
+            subdomain_id=sub_id,
+            vuln_type=vuln_type,
+            severity=severity,
+            title=title[:255],
+            description=description,
+            discovered_at=datetime.now(timezone.utc),
+            status="open",
+        ))
+        inserted += 1
     return inserted
+
+
+def _parse_ffuf(ffuf_file: Path) -> int:
+    """Parse a single ffuf JSON result file. Returns count of discovered URLs."""
+    content = ffuf_file.read_text(encoding="utf-8", errors="ignore")
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        return 0
+    results = data.get("results") or []
+    count = 0
+    for item in results:
+        if item.get("url") or item.get("input", {}).get("FUZZ"):
+            count += 1
+    return count
+
+
+def _parse_httpx_alive(httpx_file: Path, scan_run_id: int, db: Session) -> int:
+    """Parse httpx JSONL output and mark matching Subdomain rows as is_alive=True."""
+    from app.db.models import Subdomain
+    updated = 0
+    content = httpx_file.read_text(encoding="utf-8", errors="ignore")
+    for raw in content.splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        host_raw = obj.get("host") or obj.get("url") or obj.get("input") or ""
+        host = re.sub(r"^https?://", "", host_raw).split("/")[0].split(":")[0].lower()
+        if not host:
+            continue
+        sub = (
+            db.query(Subdomain)
+            .filter(Subdomain.scan_run_id == scan_run_id, Subdomain.subdomain == host)
+            .first()
+        )
+        if sub and not sub.is_alive:
+            sub.is_alive = True
+            updated += 1
+    if updated:
+        db.commit()
+    return updated
+
+
+_FEROX_STATUS_RE = re.compile(r"\b([2-5]\d{2})\b")
+_FEROX_URL_RE = re.compile(r"https?://\S+")
+
+
+def _parse_feroxbuster(ferox_file: Path) -> int:
+    """Parse feroxbuster or dirsearch text output. Returns discovered URL count."""
+    count = 0
+    for raw in ferox_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if _FEROX_STATUS_RE.search(line) and _FEROX_URL_RE.search(line):
+            count += 1
+    return count
 
 
 def _ingest_results(scan_run_id: int, domain: str, output_dir: Path,
@@ -422,6 +499,45 @@ def _ingest_results(scan_run_id: int, domain: str, output_dir: Path,
             _emit_event(db, scan_run_id, "log", "warning",
                         f"[ingestion] Nuclei parse error: {exc}")
         break  # only process first matching file
+
+    # ── FFUF results (each file individually) ────────────────────────────────
+    for ffuf_file in output_dir.glob("ffuf_*.json"):
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Parsing ffuf: {ffuf_file.name}")
+            count = _parse_ffuf(ffuf_file)
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] FFUF: {count} URLs in {ffuf_file.name}")
+        except Exception as exc:
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] FFUF parse error ({ffuf_file.name}): {exc}")
+
+    # ── HTTPx / SubProber alive results ──────────────────────────────────────
+    for httpx_file in [output_dir / "httpx_alive.json", *output_dir.glob("subprober_*.json")]:
+        if not httpx_file.is_file():
+            continue
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Parsing HTTPx alive: {httpx_file.name}")
+            count = _parse_httpx_alive(httpx_file, scan_run_id, db)
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] HTTPx: {count} subdomains marked alive")
+        except Exception as exc:
+            db.rollback()
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] HTTPx parse error ({httpx_file.name}): {exc}")
+
+    # ── Feroxbuster / Dirsearch discovered URLs ───────────────────────────────
+    for ferox_file in [*output_dir.glob("feroxbuster_*.txt"), *output_dir.glob("dirsearch_*.txt")]:
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Parsing directory brute: {ferox_file.name}")
+            count = _parse_feroxbuster(ferox_file)
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Dir brute: {count} URLs in {ferox_file.name}")
+        except Exception as exc:
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] Feroxbuster parse error ({ferox_file.name}): {exc}")
 
 
 # ---------------------------------------------------------------------------

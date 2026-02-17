@@ -26,6 +26,34 @@ echo "[*] Output directory: $PHASE_DIR"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/common.sh"
 
+# ── Tool-run counters ─────────────────────────────────────────────────────────
+TOOLS_SUCCESS=0
+TOOLS_FAILED=0
+TOOLS_SKIPPED=0
+
+# ── Generic tool runner with timeout and availability check ───────────────────
+run_tool() {
+    local tool_name="$1"
+    local output_file="$2"
+    local timeout_duration="${3:-600}"
+    shift 3
+    local cmd="$*"
+    if ! command -v "$tool_name" &>/dev/null; then
+        log_warn "$tool_name not installed, skipping"
+        ((TOOLS_SKIPPED++)); return 2
+    fi
+    touch "${output_file}" 2>/dev/null || true
+    if timeout "$timeout_duration" bash -c "$cmd" 2>"${output_file}.err"; then
+        log_info "$tool_name completed"
+        ((TOOLS_SUCCESS++)); return 0
+    else
+        local ec=$?
+        [ $ec -eq 124 ] && log_error "$tool_name timed out after ${timeout_duration}s" \
+                        || log_error "$tool_name failed (exit $ec)"
+        ((TOOLS_FAILED++)); return 1
+    fi
+}
+
 # Concurrency controls
 THREADS="${RECONX_THREADS:-10}"
 SQLMAP_THREADS="${RECONX_SQLMAP_THREADS:-5}"
@@ -63,10 +91,11 @@ run_parallel_from_file() {
     tr '\n' '\0' < "$input_file" | xargs -0 -I{} -P "$parallelism" bash -c "$command" _ "{}"
 }
 
-# Check prerequisites
+# Check prerequisites — non-fatal: create empty file and continue
 if [ ! -f "$PHASE1_DIR/alive_hosts.txt" ]; then
-    log_error "Phase 1 output not found. Run Phase 1 first!"
-    exit 1
+    log_warn "Phase 1 alive_hosts.txt not found; creating empty file and continuing with limited data"
+    mkdir -p "$PHASE1_DIR"
+    touch "$PHASE1_DIR/alive_hosts.txt"
 fi
 
 ALIVE_HOSTS="$PHASE1_DIR/alive_hosts.txt"
@@ -483,6 +512,6 @@ fi
 
 # Create phase completion marker
 touch "$PHASE_DIR/.completed"
-log_info "Phase 4 completed successfully!"
+log_info "Phase 4 complete: success=$TOOLS_SUCCESS failed=$TOOLS_FAILED skipped=$TOOLS_SKIPPED"
 
 exit 0

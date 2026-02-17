@@ -82,7 +82,8 @@ class ReconX:
 
     def __init__(self, targets: List[str], output_dir: str = "output",
                  db_path: str = "reconx.db", threads: int = 5,
-                 test_mode: bool = False):
+                 test_mode: bool = False, resume: bool = False,
+                 strict_mode: bool = False):
         self.targets = targets
         self.output_dir = Path(output_dir)
         self.test_mode = test_mode
@@ -98,7 +99,10 @@ class ReconX:
             "RECONX_PHASE_TIMEOUT",
             str(general.get('timeout', 3600))
         ))
-        self.continue_on_fail = os.getenv("RECONX_CONTINUE_ON_FAIL", "1").lower() in ("1", "true", "yes")
+        # --strict overrides --best-effort and env var
+        _env_continue = os.getenv("RECONX_CONTINUE_ON_FAIL", "1").lower() in ("1", "true", "yes")
+        self.continue_on_fail = (not strict_mode) and _env_continue
+        self.resume = resume
         self.phase_timeouts = {
             1: int(os.getenv("RECONX_PHASE1_TIMEOUT", str(self.phase_timeout_default))),
             2: int(os.getenv("RECONX_PHASE2_TIMEOUT", str(max(self.phase_timeout_default, 7200)))),
@@ -153,9 +157,16 @@ class ReconX:
         if logger.handlers:
             return logger
 
-        # Console handler — INFO and above, colored
+        # Apply logging.level from config.yaml (overridable via env LOG_LEVEL)
+        _cfg_level_name = os.getenv(
+            "LOG_LEVEL",
+            self.config.get("logging", {}).get("level", "INFO")
+        ).upper()
+        _cfg_level = getattr(logging, _cfg_level_name, logging.INFO)
+
+        # Console handler — config-driven level, colored
         console = logging.StreamHandler()
-        console.setLevel(logging.INFO)
+        console.setLevel(_cfg_level)
         console.setFormatter(ColorFormatter('%(message)s'))
         logger.addHandler(console)
 
@@ -510,14 +521,14 @@ Attack Surface Management Framework
 
                     # Phase 1: Discovery
                     if phase_num == 1:
-                        progress = self.db.get_progress(target)
+                        progress = self.db.get_progress(target) if self.resume else None
                         if progress and progress['phase1_done'] and not self.phase1_outputs_ok(target_dir):
                             self.logger.warning("Phase 1 marked complete but outputs missing; rerunning...")
                             self.db.update_phase(target, 1, False)
                             progress = None
 
-                        if progress and progress['phase1_done']:
-                            self.logger.warning("Phase 1 already completed, skipping...")
+                        if self.resume and progress and progress['phase1_done']:
+                            self.logger.info("Phase 1 already complete, skipping (--resume)")
                         else:
                             self.log_phase(f"Phase 1: Discovery & Enumeration - {target}")
                             if self.run_module("01_discovery.sh", target, target_dir, timeout=self.phase_timeouts[1]):
@@ -531,9 +542,9 @@ Attack Surface Management Framework
 
                     # Phase 2: Intelligence
                     elif phase_num == 2 and (success or self.continue_on_fail):
-                        progress = self.db.get_progress(target)
-                        if progress and progress['phase2_done']:
-                            self.logger.warning("Phase 2 already completed, skipping...")
+                        progress = self.db.get_progress(target) if self.resume else None
+                        if self.resume and progress and progress['phase2_done']:
+                            self.logger.info("Phase 2 already complete, skipping (--resume)")
                         else:
                             self.log_phase(f"Phase 2: Intelligence & Infrastructure - {target}")
                             if self.run_module("02_intel.sh", target, target_dir, timeout=self.phase_timeouts[2]):
@@ -547,9 +558,9 @@ Attack Surface Management Framework
 
                     # Phase 3: Content Discovery
                     elif phase_num == 3 and (success or self.continue_on_fail):
-                        progress = self.db.get_progress(target)
-                        if progress and progress['phase3_done']:
-                            self.logger.warning("Phase 3 already completed, skipping...")
+                        progress = self.db.get_progress(target) if self.resume else None
+                        if self.resume and progress and progress['phase3_done']:
+                            self.logger.info("Phase 3 already complete, skipping (--resume)")
                         else:
                             self.log_phase(f"Phase 3: Deep Web & Content Discovery - {target}")
                             if self.run_module("03_content.sh", target, target_dir, timeout=self.phase_timeouts[3]):
@@ -563,9 +574,9 @@ Attack Surface Management Framework
 
                     # Phase 4: Vulnerability Scanning
                     elif phase_num == 4 and (success or self.continue_on_fail):
-                        progress = self.db.get_progress(target)
-                        if progress and progress['phase4_done']:
-                            self.logger.warning("Phase 4 already completed, skipping...")
+                        progress = self.db.get_progress(target) if self.resume else None
+                        if self.resume and progress and progress['phase4_done']:
+                            self.logger.info("Phase 4 already complete, skipping (--resume)")
                         else:
                             self.log_phase(f"Phase 4: Vulnerability Scanning - {target}")
                             if self.run_module("04_vuln.sh", target, target_dir, timeout=self.phase_timeouts[4]):
@@ -701,6 +712,18 @@ Attack Surface Management Framework
             self.print_statistics(target)
 
 
+def _early_config() -> Dict[str, Any]:
+    """Load config.yaml before argparse runs (needed for default values)."""
+    path = Path(__file__).parent / "config.yaml"
+    if path.exists():
+        try:
+            with open(path) as f:
+                return yaml.safe_load(f) or {}
+        except Exception:
+            pass
+    return {}
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="ReconX - Attack Surface Management Framework",
@@ -735,11 +758,20 @@ Phases:
 
     parser.add_argument('-t', '--target', help='Target domain(s), comma-separated')
     parser.add_argument('-f', '--file', help='File containing target domains (one per line)')
-    parser.add_argument('-o', '--output', default='output', help='Output directory (default: output)')
+    # Default output_dir: config.yaml general.output_dir → env RECONX_OUTPUT_DIR → 'output'
+    _default_output = os.getenv(
+        "RECONX_OUTPUT_DIR",
+        _early_config().get("general", {}).get("output_dir", "output")
+    )
+    parser.add_argument('-o', '--output', default=_default_output, help='Output directory (default: output)')
     parser.add_argument('-d', '--database', default=os.getenv('RECONX_DB_PATH', 'reconx.db'), help='Database file path (default: reconx.db or RECONX_DB_PATH)')
     parser.add_argument('-p', '--phases', default='1,2,3,4', help='Phases to run (default: 1,2,3,4)')
     parser.add_argument('-T', '--threads', type=int, default=5, help='Number of concurrent target scans (default: 5)')
-    parser.add_argument('--resume', action='store_true', help='Resume incomplete scans')
+    parser.add_argument('--resume', action='store_true', help='Resume incomplete scans — skip phases already marked done')
+    parser.add_argument('--best-effort', action='store_true', default=True,
+                        help='Continue scanning even if a phase fails (default)')
+    parser.add_argument('--strict', action='store_true', default=False,
+                        help='Stop on first phase failure (overrides --best-effort)')
     parser.add_argument('--test', action='store_true', help='Run in test mode with mock data (no live scanning)')
 
     args = parser.parse_args()
@@ -790,7 +822,9 @@ Phases:
         output_dir=args.output,
         db_path=args.database,
         threads=args.threads,
-        test_mode=args.test
+        test_mode=args.test,
+        resume=args.resume,
+        strict_mode=args.strict,
     )
 
     try:
