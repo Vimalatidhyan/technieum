@@ -1,0 +1,3159 @@
+
+
+# >>> app/api/models/finding.py
+
+"""Finding Pydantic schemas with enhanced validation."""
+from pydantic import BaseModel, Field, field_validator
+from datetime import datetime
+from typing import Optional, List
+
+class FindingResponse(BaseModel):
+    id: int
+    scan_run_id: Optional[int] = None
+    vuln_type: Optional[str] = None
+    severity: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    remediation: Optional[str] = None
+    discovered_at: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+
+class FindingListResponse(BaseModel):
+    total: int
+    page: int
+    per_page: int
+    items: List[FindingResponse]
+
+class FindingUpdateRequest(BaseModel):
+    severity: Optional[str] = Field(
+        default=None,
+        description="Severity level (critical, high, medium, low, info)"
+    )
+    remediation: Optional[str] = Field(
+        default=None,
+        max_length=10000,
+        description="Remediation instructions"
+    )
+    status: Optional[str] = Field(
+        default=None,
+        pattern=r'^(open|confirmed|resolved|false_positive|wont_fix)$',
+        description="Finding status"
+    )
+    
+    @field_validator('remediation')
+    @classmethod
+    def validate_remediation(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize remediation text."""
+        if v is not None:
+            v = v.strip()
+            if len(v) == 0:
+                return None
+        return v
+
+
+# >>> app/api/models/intel.py
+
+"""Threat intel Pydantic schemas."""
+from pydantic import BaseModel
+from datetime import datetime
+from typing import Optional
+
+class ThreatIntelResponse(BaseModel):
+    id: int
+    indicator_type: str
+    indicator_value: str
+    severity: Optional[int] = None
+    source: str
+    last_updated: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+
+
+# >>> app/api/models/asset.py
+
+"""Asset Pydantic schemas."""
+from pydantic import BaseModel
+from datetime import datetime
+from typing import Optional, List
+
+class AssetResponse(BaseModel):
+    id: int
+    subdomain: str
+    is_alive: Optional[bool] = False
+    scan_run_id: Optional[int] = None
+    priority: Optional[int] = 0
+    first_seen: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+
+class AssetListResponse(BaseModel):
+    total: int
+    page: int
+    per_page: int
+    items: List[AssetResponse]
+
+
+# >>> app/api/models/__init__.py
+
+
+
+# >>> app/api/models/common.py
+
+"""Common Pydantic schemas."""
+from pydantic import BaseModel
+from typing import TypeVar, Generic, List, Optional
+T = TypeVar("T")
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    total: int
+    page: int
+    per_page: int
+    items: List[T]  # type: ignore[misc]
+
+class ErrorResponse(BaseModel):
+    detail: str
+    code: Optional[str] = None
+
+class StatusResponse(BaseModel):
+    status: str
+    message: Optional[str] = None
+
+
+# >>> app/api/models/scan.py
+
+"""Scan Pydantic schemas with enhanced validation."""
+from pydantic import BaseModel, Field, validator, field_validator
+from datetime import datetime
+from typing import Optional, List
+import re
+
+class ScanCreateRequest(BaseModel):
+    domain: str = Field(
+        ...,
+        min_length=3,
+        max_length=255,
+        description="Target domain (e.g., example.com)",
+        pattern=r'^[a-zA-Z0-9][a-zA-Z0-9-_.]*[a-zA-Z0-9]$'
+    )
+    scan_type: str = Field(
+        default="full",
+        pattern=r'^(full|quick|deep|custom)$',
+        description="Scan type: full, quick, deep, or custom"
+    )
+    custom_phases: Optional[List[int]] = Field(
+        default=None,
+        description="Custom phase selection (0-4)"
+    )
+    
+    @field_validator('domain')
+    @classmethod
+    def validate_domain(cls, v: str) -> str:
+        """Validate domain format and remove dangerous characters."""
+        v = v.lower().strip()
+        
+        # Reject IP addresses (should use IP scanning endpoint)
+        ip_pattern = r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$'
+        if re.match(ip_pattern, v):
+            raise ValueError('Use IP scanning endpoint for IP addresses')
+        
+        # Reject localhost and internal domains
+        if v in ['localhost', '127.0.0.1', '0.0.0.0'] or v.endswith('.local'):
+            raise ValueError('Cannot scan localhost or internal domains')
+        
+        # Basic domain validation
+        domain_pattern = r'^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$'
+        if not re.match(domain_pattern, v):
+            raise ValueError('Invalid domain format')
+        
+        return v
+    
+    @field_validator('custom_phases')
+    @classmethod
+    def validate_custom_phases(cls, v: Optional[List[int]]) -> Optional[List[int]]:
+        """Validate custom phases are in valid range."""
+        if v is not None:
+            if not v:
+                raise ValueError('custom_phases must not be empty if provided')
+            if not all(0 <= p <= 4 for p in v):
+                raise ValueError('Phase numbers must be between 0-4')
+            if len(v) != len(set(v)):
+                raise ValueError('Duplicate phases not allowed')
+            return sorted(v)
+        return v
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "domain": "example.com",
+                "scan_type": "full",
+                "custom_phases": [0, 1, 2]
+            }
+        }
+    }
+
+class ScanUpdateRequest(BaseModel):
+    status: Optional[str] = Field(
+        default=None,
+        pattern=r'^(running|paused|stopped|completed|failed)$',
+        description="Scan status"
+    )
+    scan_type: Optional[str] = Field(
+        default=None,
+        pattern=r'^(full|quick|deep|custom)$'
+    )
+
+class ScanResponse(BaseModel):
+    id: int
+    domain: str
+    scan_type: Optional[str] = "full"
+    status: Optional[str] = "pending"
+    risk_score: Optional[int] = None
+    phase: Optional[int] = 0
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+
+class ScanListResponse(BaseModel):
+    total: int
+    page: int
+    per_page: int
+    items: List[ScanResponse]
+
+
+# >>> app/db/models.py
+
+"""ReconX Enterprise v2.0 — SQLAlchemy ORM models.
+
+Contains all 25 database models for the ASM scanning platform,
+organized into five groups:
+
+1. Core Scanning (ScanRun, Subdomain, PortScan, Vulnerability, HTTPHeader)
+2. Intelligence (Technology, DomainTechnology, VulnerabilityMetadata,
+   DNSRecord, ISPLocation, ThreatIntelData)
+3. Compliance & Reporting (ComplianceReport, ComplianceFinding,
+   RiskScore, AuditLog, AssetSnapshot)
+4. Change Tracking (AssetChange, ChangeNotification, WebsiteSnapshot)
+5. Integration & System (ScannerIntegration, ScanRunnerMetadata,
+   APIKey, SavedReport, ScheduledScan, KnownVulnerability)
+"""
+
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import relationship
+
+from app.db.base import Base
+
+
+# ---------------------------------------------------------------------------
+# Group 1: Core Scanning Models
+# ---------------------------------------------------------------------------
+
+
+class ScanRun(Base):
+    """Represents a single domain scanning operation.
+
+    Each scan tracks one target domain through all 9 phases:
+    discovery, port scanning, vulnerability detection, threat intel,
+    risk scoring, change detection, compliance mapping, attack graph,
+    and continuous monitoring.
+    """
+
+    __tablename__ = "scan_runs"
+
+    id: int = Column(Integer, primary_key=True)
+    domain: str = Column(String(255), nullable=False, index=True)
+    scan_type: str = Column(String(50), default="full")
+    status: str = Column(String(50), default="pending")
+    created_at: datetime = Column(DateTime, default=datetime.utcnow, index=True)
+    completed_at: Optional[datetime] = Column(DateTime, nullable=True)
+    risk_score: Optional[int] = Column(Integer, nullable=True)
+    phase: int = Column(Integer, default=0)
+
+    # Relationships
+    subdomains = relationship(
+        "Subdomain", back_populates="scan_run", cascade="all, delete-orphan"
+    )
+    vulnerabilities = relationship(
+        "Vulnerability", back_populates="scan_run", cascade="all, delete-orphan"
+    )
+    dns_records = relationship(
+        "DNSRecord", back_populates="scan_run", cascade="all, delete-orphan"
+    )
+    compliance_reports = relationship(
+        "ComplianceReport",
+        back_populates="scan_run",
+        cascade="all, delete-orphan",
+    )
+    domain_technologies = relationship(
+        "DomainTechnology",
+        back_populates="scan_run",
+        cascade="all, delete-orphan",
+    )
+    isp_locations = relationship(
+        "ISPLocation", back_populates="scan_run", cascade="all, delete-orphan"
+    )
+    risk_scores = relationship(
+        "RiskScore", back_populates="scan_run", cascade="all, delete-orphan"
+    )
+    asset_snapshots = relationship(
+        "AssetSnapshot",
+        back_populates="scan_run",
+        cascade="all, delete-orphan",
+    )
+    scanner_metadata = relationship(
+        "ScanRunnerMetadata",
+        back_populates="scan_run",
+        cascade="all, delete-orphan",
+    )
+    saved_reports = relationship(
+        "SavedReport", back_populates="scan_run", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("idx_scan_runs_domain_created", "domain", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<ScanRun(id={self.id}, domain={self.domain}, "
+            f"status={self.status})>"
+        )
+
+
+class Subdomain(Base):
+    """Discovered subdomain under a target domain.
+
+    Tracks alive status and how the subdomain was discovered
+    (passive DNS, active enumeration, or crawling).
+    """
+
+    __tablename__ = "subdomains"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    subdomain: str = Column(String(255), nullable=False)
+    is_alive: bool = Column(Boolean, default=False)
+    discovered_method: Optional[str] = Column(String(50), nullable=True)
+    first_seen: datetime = Column(DateTime, default=datetime.utcnow)
+    last_seen: Optional[datetime] = Column(DateTime, nullable=True)
+    priority: int = Column(Integer, default=0)
+
+    # Relationships
+    scan_run = relationship("ScanRun", back_populates="subdomains")
+    port_scans = relationship(
+        "PortScan", back_populates="subdomain", cascade="all, delete-orphan"
+    )
+    vulnerabilities = relationship(
+        "Vulnerability", back_populates="subdomain"
+    )
+    http_headers = relationship(
+        "HTTPHeader",
+        back_populates="subdomain",
+        cascade="all, delete-orphan",
+    )
+    website_snapshots = relationship(
+        "WebsiteSnapshot",
+        back_populates="subdomain",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("idx_subdomains_scan_subdomain", "scan_run_id", "subdomain"),
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<Subdomain(id={self.id}, subdomain={self.subdomain}, "
+            f"is_alive={self.is_alive})>"
+        )
+
+
+class PortScan(Base):
+    """Port scan result for a subdomain.
+
+    Tracks open ports, services, versions, and state. Used to
+    identify the attack surface of each discovered host.
+    """
+
+    __tablename__ = "port_scans"
+
+    id: int = Column(Integer, primary_key=True)
+    subdomain_id: int = Column(
+        Integer, ForeignKey("subdomains.id"), nullable=False, index=True
+    )
+    port: int = Column(Integer, nullable=False)
+    protocol: str = Column(String(10), default="tcp")
+    state: str = Column(String(50), default="closed")
+    service: Optional[str] = Column(String(100), nullable=True)
+    version: Optional[str] = Column(String(100), nullable=True)
+    scanned_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    subdomain = relationship("Subdomain", back_populates="port_scans")
+    vulnerabilities = relationship(
+        "Vulnerability", back_populates="port_scan"
+    )
+
+    __table_args__ = (
+        Index("idx_port_scans_subdomain_port", "subdomain_id", "port"),
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<PortScan(port={self.port}, service={self.service}, "
+            f"state={self.state})>"
+        )
+
+
+class Vulnerability(Base):
+    """Security finding from scanning.
+
+    Can be port-based (weak cipher), web-based (XSS), or
+    service-based (unpatched software). Links to scan run,
+    subdomain, and optionally a specific port.
+    """
+
+    __tablename__ = "vulnerabilities"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    subdomain_id: Optional[int] = Column(
+        Integer, ForeignKey("subdomains.id"), nullable=True, index=True
+    )
+    port_scan_id: Optional[int] = Column(
+        Integer, ForeignKey("port_scans.id"), nullable=True, index=True
+    )
+    vuln_type: str = Column(String(100), nullable=False)
+    severity: Optional[int] = Column(Integer, nullable=True)
+    title: str = Column(String(255), nullable=False)
+    description: Optional[str] = Column(String(2000), nullable=True)
+    remediation: Optional[str] = Column(String(2000), nullable=True)
+    discovered_at: datetime = Column(DateTime, default=datetime.utcnow)
+    cve_ids: Optional[str] = Column(String(1000), nullable=True)
+    risk_score: Optional[int] = Column(Integer, nullable=True)
+    status: Optional[str] = Column(String(50), nullable=True, default="open")
+
+    # Relationships
+    scan_run = relationship("ScanRun", back_populates="vulnerabilities")
+    subdomain = relationship("Subdomain", back_populates="vulnerabilities")
+    port_scan = relationship("PortScan", back_populates="vulnerabilities")
+    vuln_metadata = relationship(
+        "VulnerabilityMetadata",
+        back_populates="vulnerability",
+        cascade="all, delete-orphan",
+    )
+    threat_intel = relationship(
+        "ThreatIntelData", back_populates="vulnerability"
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<Vulnerability(id={self.id}, type={self.vuln_type}, "
+            f"severity={self.severity})>"
+        )
+
+
+class HTTPHeader(Base):
+    """HTTP response header captured from a subdomain.
+
+    Used to detect technology stack, security header presence,
+    and server configuration information.
+    """
+
+    __tablename__ = "http_headers"
+
+    id: int = Column(Integer, primary_key=True)
+    subdomain_id: int = Column(
+        Integer, ForeignKey("subdomains.id"), nullable=False, index=True
+    )
+    header_name: str = Column(String(255), nullable=False)
+    header_value: str = Column(String(2000), nullable=False)
+    discovered_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    subdomain = relationship("Subdomain", back_populates="http_headers")
+
+    __table_args__ = (
+        Index("idx_http_headers_subdomain_name", "subdomain_id", "header_name"),
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<HTTPHeader(name={self.header_name}, "
+            f"value={self.header_value[:50]})>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Group 2: Intelligence Models
+# ---------------------------------------------------------------------------
+
+
+class Technology(Base):
+    """Technology catalog entry.
+
+    A shared registry of technologies like Apache, Nginx, WordPress,
+    Node.js, Django, etc. Reusable across all scans via the
+    DomainTechnology junction table.
+    """
+
+    __tablename__ = "technologies"
+
+    id: int = Column(Integer, primary_key=True)
+    name: str = Column(String(100), nullable=False, unique=True)
+    category: str = Column(String(50), nullable=False)
+    type: str = Column(String(50), nullable=False)
+    cpes: Optional[str] = Column(String(1000), nullable=True)
+    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    domain_technologies = relationship(
+        "DomainTechnology", back_populates="technology"
+    )
+    known_vulnerabilities = relationship(
+        "KnownVulnerability",
+        back_populates="technology",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<Technology(name={self.name}, category={self.category})>"
+        )
+
+
+class DomainTechnology(Base):
+    """Junction table linking scan runs to detected technologies.
+
+    Records which technologies were found during a scan, along with
+    detected version, discovery method, and confidence level.
+    """
+
+    __tablename__ = "domain_technologies"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    technology_id: int = Column(
+        Integer, ForeignKey("technologies.id"), nullable=False, index=True
+    )
+    version: Optional[str] = Column(String(100), nullable=True)
+    discovered_method: Optional[str] = Column(String(100), nullable=True)
+    confidence: int = Column(Integer, default=100)
+    discovered_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    scan_run = relationship("ScanRun", back_populates="domain_technologies")
+    technology = relationship(
+        "Technology", back_populates="domain_technologies"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "scan_run_id", "technology_id", name="uq_scan_technology"
+        ),
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<DomainTechnology(technology_id={self.technology_id}, "
+            f"version={self.version})>"
+        )
+
+
+class VulnerabilityMetadata(Base):
+    """Enriched vulnerability data from external sources.
+
+    Links to CVE database, CVSS v3.1 scores, EPSS exploit
+    probability, CISA KEV status, and Metasploit module
+    availability.
+    """
+
+    __tablename__ = "vulnerability_metadata"
+
+    id: int = Column(Integer, primary_key=True)
+    vulnerability_id: int = Column(
+        Integer, ForeignKey("vulnerabilities.id"), nullable=False, index=True
+    )
+    cve_id: Optional[str] = Column(String(50), nullable=True)
+    cvss_v31_score: Optional[float] = Column(Float, nullable=True)
+    cvss_v31_vector: Optional[str] = Column(String(100), nullable=True)
+    epss_score: Optional[float] = Column(Float, nullable=True)
+    in_kev: bool = Column(Boolean, default=False)
+    has_metasploit: bool = Column(Boolean, default=False)
+    active_exploitation: bool = Column(Boolean, default=False)
+    days_since_published: Optional[int] = Column(Integer, nullable=True)
+    affected_versions: Optional[str] = Column(String(1000), nullable=True)
+    source: Optional[str] = Column(String(100), nullable=True)
+    checked_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    vulnerability = relationship("Vulnerability", back_populates="vuln_metadata")
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<VulnerabilityMetadata(cve={self.cve_id}, "
+            f"cvss={self.cvss_v31_score})>"
+        )
+
+
+class DNSRecord(Base):
+    """DNS record discovered during scanning.
+
+    Tracks all DNS data (A, AAAA, CNAME, MX, TXT, NS, SOA)
+    about the target domain and its subdomains.
+    """
+
+    __tablename__ = "dns_records"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    domain: str = Column(String(255), nullable=False)
+    record_type: str = Column(String(10), nullable=False)
+    value: str = Column(String(1000), nullable=False)
+    ttl: Optional[int] = Column(Integer, nullable=True)
+    discovered_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    scan_run = relationship("ScanRun", back_populates="dns_records")
+
+    __table_args__ = (
+        Index("idx_dns_records_domain_type", "domain", "record_type"),
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<DNSRecord(type={self.record_type}, value={self.value})>"
+        )
+
+
+class ISPLocation(Base):
+    """IP geolocation and ISP information.
+
+    Records the ISP, country, region, city, and coordinates
+    for IP addresses discovered during scanning.
+    """
+
+    __tablename__ = "isp_locations"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    ip_address: str = Column(String(45), nullable=False)
+    isp_name: Optional[str] = Column(String(255), nullable=True)
+    country: Optional[str] = Column(String(100), nullable=True)
+    region: Optional[str] = Column(String(100), nullable=True)
+    city: Optional[str] = Column(String(100), nullable=True)
+    latitude: Optional[float] = Column(Float, nullable=True)
+    longitude: Optional[float] = Column(Float, nullable=True)
+    discovered_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    scan_run = relationship("ScanRun", back_populates="isp_locations")
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<ISPLocation(ip={self.ip_address}, "
+            f"country={self.country})>"
+        )
+
+
+class ThreatIntelData(Base):
+    """External threat intelligence indicator.
+
+    Stores threat indicators from sources like AbuseIPDB,
+    VirusTotal, GreyNoise, etc. Can be linked to a specific
+    vulnerability or stand alone.
+    """
+
+    __tablename__ = "threat_intel_data"
+
+    id: int = Column(Integer, primary_key=True)
+    vulnerability_id: Optional[int] = Column(
+        Integer, ForeignKey("vulnerabilities.id"), nullable=True, index=True
+    )
+    indicator_type: str = Column(String(50), nullable=False)
+    indicator_value: str = Column(String(500), nullable=False)
+    severity: Optional[int] = Column(Integer, nullable=True)
+    source: str = Column(String(100), nullable=False)
+    description: Optional[str] = Column(Text, nullable=True)
+    last_updated: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    vulnerability = relationship(
+        "Vulnerability", back_populates="threat_intel"
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<ThreatIntelData(type={self.indicator_type}, "
+            f"source={self.source})>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Group 3: Compliance & Reporting Models
+# ---------------------------------------------------------------------------
+
+
+class ComplianceReport(Base):
+    """Compliance report generated for a scan run.
+
+    Aggregates compliance check results against frameworks
+    like PCI-DSS, HIPAA, GDPR, ISO 27001, SOC 2, and NIST CSF.
+    """
+
+    __tablename__ = "compliance_reports"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    report_type: str = Column(String(50), nullable=False)
+    generated_at: datetime = Column(DateTime, default=datetime.utcnow)
+    passed_checks: int = Column(Integer, default=0)
+    failed_checks: int = Column(Integer, default=0)
+    overall_score: Optional[int] = Column(Integer, nullable=True)
+
+    # Relationships
+    scan_run = relationship("ScanRun", back_populates="compliance_reports")
+    findings = relationship(
+        "ComplianceFinding",
+        back_populates="report",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<ComplianceReport(type={self.report_type}, "
+            f"score={self.overall_score})>"
+        )
+
+
+class ComplianceFinding(Base):
+    """Individual compliance check result within a report.
+
+    Represents a single requirement check (e.g. PCI-DSS-6.2)
+    with its pass/fail status, evidence, and remediation guidance.
+    """
+
+    __tablename__ = "compliance_findings"
+
+    id: int = Column(Integer, primary_key=True)
+    report_id: int = Column(
+        Integer,
+        ForeignKey("compliance_reports.id"),
+        nullable=False,
+        index=True,
+    )
+    requirement_id: str = Column(String(50), nullable=False)
+    control_name: str = Column(String(255), nullable=False)
+    status: str = Column(String(20), nullable=False)
+    evidence: Optional[str] = Column(Text, nullable=True)
+    remediation: Optional[str] = Column(Text, nullable=True)
+    severity: Optional[str] = Column(String(20), nullable=True)
+
+    # Relationships
+    report = relationship("ComplianceReport", back_populates="findings")
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<ComplianceFinding(req={self.requirement_id}, "
+            f"status={self.status})>"
+        )
+
+
+class RiskScore(Base):
+    """Calculated risk summary for a scan run.
+
+    Aggregates vulnerability counts by severity tier and computes
+    an overall risk score for executive reporting.
+    """
+
+    __tablename__ = "risk_scores"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    calculation_method: str = Column(String(50), nullable=False)
+    critical_count: int = Column(Integer, default=0)
+    high_count: int = Column(Integer, default=0)
+    medium_count: int = Column(Integer, default=0)
+    low_count: int = Column(Integer, default=0)
+    overall_score: int = Column(Integer, default=0)
+    calculated_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    scan_run = relationship("ScanRun", back_populates="risk_scores")
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<RiskScore(score={self.overall_score}, "
+            f"method={self.calculation_method})>"
+        )
+
+
+class AuditLog(Base):
+    """Audit trail entry for compliance and debugging.
+
+    Records who performed what action, on which entity,
+    and when. Standalone model with no foreign key dependencies.
+    """
+
+    __tablename__ = "audit_logs"
+
+    id: int = Column(Integer, primary_key=True)
+    user: str = Column(String(255), nullable=False)
+    action: str = Column(String(100), nullable=False)
+    entity_type: str = Column(String(100), nullable=False)
+    entity_id: Optional[int] = Column(Integer, nullable=True)
+    details: Optional[str] = Column(Text, nullable=True)
+    timestamp: datetime = Column(
+        DateTime, default=datetime.utcnow, index=True
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<AuditLog(user={self.user}, action={self.action}, "
+            f"entity={self.entity_type})>"
+        )
+
+
+class AssetSnapshot(Base):
+    """Point-in-time snapshot of asset counts for trending.
+
+    Records subdomain, port, and vulnerability counts at a
+    specific date so that changes can be tracked over time.
+    """
+
+    __tablename__ = "asset_snapshots"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    snapshot_date: datetime = Column(DateTime, default=datetime.utcnow)
+    domain_count: int = Column(Integer, default=0)
+    subdomain_count: int = Column(Integer, default=0)
+    open_port_count: int = Column(Integer, default=0)
+    vulnerability_count: int = Column(Integer, default=0)
+    critical_vuln_count: int = Column(Integer, default=0)
+
+    # Relationships
+    scan_run = relationship("ScanRun", back_populates="asset_snapshots")
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<AssetSnapshot(date={self.snapshot_date}, "
+            f"vulns={self.vulnerability_count})>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Group 4: Change Tracking Models
+# ---------------------------------------------------------------------------
+
+
+class AssetChange(Base):
+    """Change detected between two asset snapshots.
+
+    Highlights new subdomains, removed ports, modified
+    technologies, or new vulnerabilities between scan runs.
+    """
+
+    __tablename__ = "asset_changes"
+
+    id: int = Column(Integer, primary_key=True)
+    previous_snapshot_id: int = Column(
+        Integer, ForeignKey("asset_snapshots.id"), nullable=False, index=True
+    )
+    current_snapshot_id: int = Column(
+        Integer, ForeignKey("asset_snapshots.id"), nullable=False, index=True
+    )
+    change_type: str = Column(String(20), nullable=False)
+    asset_type: str = Column(String(50), nullable=False)
+    description: Optional[str] = Column(Text, nullable=True)
+    severity: Optional[str] = Column(String(20), nullable=True)
+    detected_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    previous_snapshot = relationship(
+        "AssetSnapshot", foreign_keys=[previous_snapshot_id]
+    )
+    current_snapshot = relationship(
+        "AssetSnapshot", foreign_keys=[current_snapshot_id]
+    )
+    notifications = relationship(
+        "ChangeNotification",
+        back_populates="asset_change",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<AssetChange(type={self.change_type}, "
+            f"asset={self.asset_type})>"
+        )
+
+
+class ChangeNotification(Base):
+    """Alert delivery record for an asset change.
+
+    Tracks notification delivery via email, webhook, or Slack
+    with status tracking for retry logic.
+    """
+
+    __tablename__ = "change_notifications"
+
+    id: int = Column(Integer, primary_key=True)
+    asset_change_id: int = Column(
+        Integer, ForeignKey("asset_changes.id"), nullable=False, index=True
+    )
+    notification_type: str = Column(String(20), nullable=False)
+    recipient: str = Column(String(255), nullable=False)
+    sent_at: Optional[datetime] = Column(DateTime, nullable=True)
+    status: str = Column(String(20), default="pending")
+
+    # Relationships
+    asset_change = relationship(
+        "AssetChange", back_populates="notifications"
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<ChangeNotification(type={self.notification_type}, "
+            f"status={self.status})>"
+        )
+
+
+class WebsiteSnapshot(Base):
+    """Website content snapshot for defacement detection.
+
+    Stores content hash, HTTP status, and screenshot path
+    to detect changes in website appearance or content.
+    """
+
+    __tablename__ = "website_snapshots"
+
+    id: int = Column(Integer, primary_key=True)
+    subdomain_id: int = Column(
+        Integer, ForeignKey("subdomains.id"), nullable=False, index=True
+    )
+    captured_at: datetime = Column(DateTime, default=datetime.utcnow)
+    http_status: Optional[int] = Column(Integer, nullable=True)
+    content_hash: Optional[str] = Column(String(64), nullable=True)
+    screenshot_path: Optional[str] = Column(String(500), nullable=True)
+    crawl_depth: int = Column(Integer, default=0)
+
+    # Relationships
+    subdomain = relationship(
+        "Subdomain", back_populates="website_snapshots"
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<WebsiteSnapshot(subdomain_id={self.subdomain_id}, "
+            f"status={self.http_status})>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Group 5: Integration & System Models
+# ---------------------------------------------------------------------------
+
+
+class ScannerIntegration(Base):
+    """External scanner configuration.
+
+    Defines available scanners (Nmap, Burp, Nuclei, Trivy, etc.)
+    with their API endpoints and health status.
+    """
+
+    __tablename__ = "scanner_integrations"
+
+    id: int = Column(Integer, primary_key=True)
+    name: str = Column(String(100), nullable=False, unique=True)
+    api_endpoint: Optional[str] = Column(String(500), nullable=True)
+    status: str = Column(String(20), default="active")
+    last_check_time: Optional[datetime] = Column(DateTime, nullable=True)
+    error_message: Optional[str] = Column(Text, nullable=True)
+    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    runner_metadata = relationship(
+        "ScanRunnerMetadata", back_populates="scanner_integration"
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<ScannerIntegration(name={self.name}, "
+            f"status={self.status})>"
+        )
+
+
+class ScanRunnerMetadata(Base):
+    """Record of which scanner executed during a scan run.
+
+    Tracks execution time, status, and the location of
+    raw result files for each scanner invocation.
+    """
+
+    __tablename__ = "scan_runner_metadata"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    scanner_integration_id: int = Column(
+        Integer,
+        ForeignKey("scanner_integrations.id"),
+        nullable=False,
+        index=True,
+    )
+    scanner_name: str = Column(String(100), nullable=False)
+    executed_at: datetime = Column(DateTime, default=datetime.utcnow)
+    completed_at: Optional[datetime] = Column(DateTime, nullable=True)
+    status: str = Column(String(20), default="pending")
+    raw_results_file: Optional[str] = Column(String(500), nullable=True)
+
+    # Relationships
+    scan_run = relationship("ScanRun", back_populates="scanner_metadata")
+    scanner_integration = relationship(
+        "ScannerIntegration", back_populates="runner_metadata"
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<ScanRunnerMetadata(scanner={self.scanner_name}, "
+            f"status={self.status})>"
+        )
+
+
+class APIKey(Base):
+    """API authentication key for external integrations.
+
+    Stores hashed keys with expiration, usage tracking,
+    and rate limiting support.
+    """
+
+    __tablename__ = "api_keys"
+
+    id: int = Column(Integer, primary_key=True)
+    user_identifier: str = Column(String(255), nullable=False, index=True)
+    key_hash: str = Column(String(255), nullable=False)
+    name: str = Column(String(100), nullable=False)
+    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+    expires_at: Optional[datetime] = Column(DateTime, nullable=True)
+    last_used: Optional[datetime] = Column(DateTime, nullable=True)
+    is_active: bool = Column(Boolean, default=True)
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<APIKey(name={self.name}, user={self.user_identifier}, "
+            f"active={self.is_active})>"
+        )
+
+
+class SavedReport(Base):
+    """Generated report stored for download.
+
+    Supports multiple formats (PDF, HTML, JSON, CSV) and
+    tracks who generated the report and when.
+    """
+
+    __tablename__ = "saved_reports"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    report_type: str = Column(String(50), nullable=False)
+    format: str = Column(String(10), nullable=False)
+    file_path: str = Column(String(500), nullable=False)
+    generated_by: Optional[str] = Column(String(255), nullable=True)
+    generated_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    scan_run = relationship("ScanRun", back_populates="saved_reports")
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<SavedReport(type={self.report_type}, "
+            f"format={self.format})>"
+        )
+
+
+class ScheduledScan(Base):
+    """Recurring scan configuration for continuous monitoring.
+
+    Defines domain targets with scan frequency (daily, weekly,
+    monthly) and tracks next/last execution times.
+    """
+
+    __tablename__ = "scheduled_scans"
+
+    id: int = Column(Integer, primary_key=True)
+    domain: str = Column(String(255), nullable=False, index=True)
+    scan_type: str = Column(String(50), default="full")
+    frequency: str = Column(String(20), nullable=False)
+    next_run: Optional[datetime] = Column(DateTime, nullable=True)
+    last_run: Optional[datetime] = Column(DateTime, nullable=True)
+    is_active: bool = Column(Boolean, default=True)
+    created_by: Optional[str] = Column(String(255), nullable=True)
+    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<ScheduledScan(domain={self.domain}, "
+            f"frequency={self.frequency})>"
+        )
+
+
+class KnownVulnerability(Base):
+    """Known CVE linked to a specific technology.
+
+    Tracks CVEs associated with technologies (e.g. Apache, Nginx)
+    so that detected tech stacks can be correlated with known
+    security issues.
+    """
+
+    __tablename__ = "known_vulnerabilities"
+
+    id: int = Column(Integer, primary_key=True)
+    technology_id: int = Column(
+        Integer, ForeignKey("technologies.id"), nullable=False, index=True
+    )
+    cve_id: str = Column(String(50), nullable=False)
+    vuln_name: str = Column(String(255), nullable=False)
+    severity: Optional[int] = Column(Integer, nullable=True)
+    advisory_url: Optional[str] = Column(String(500), nullable=True)
+    affected_versions: Optional[str] = Column(String(1000), nullable=True)
+    fixed_version: Optional[str] = Column(String(100), nullable=True)
+    published_at: Optional[datetime] = Column(DateTime, nullable=True)
+
+    # Relationships
+    technology = relationship(
+        "Technology", back_populates="known_vulnerabilities"
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<KnownVulnerability(cve={self.cve_id}, "
+            f"name={self.vuln_name})>"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Supplementary Models — Phase 3-5 support
+# ---------------------------------------------------------------------------
+
+
+class ServiceSignature(Base):
+    """Service fingerprint signature.
+
+    Used to identify services from banners and port/protocol combinations.
+    """
+
+    __tablename__ = "service_signatures"
+
+    id: int = Column(Integer, primary_key=True)
+    port: int = Column(Integer, nullable=False)
+    protocol: str = Column(String(10), nullable=False)
+    service_name: str = Column(String(100), nullable=False)
+    banner_pattern: Optional[str] = Column(String(500), nullable=True)
+    version_pattern: Optional[str] = Column(String(500), nullable=True)
+    confidence: int = Column(Integer, default=80)
+    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("port", "protocol", "service_name", name="uq_service_sig"),
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<ServiceSignature(service={self.service_name}, port={self.port})>"
+        )
+
+
+class VendorMetadata(Base):
+    """Organization/vendor metadata for TPRM.
+
+    Tracks breach history, reputation, and response times.
+    """
+
+    __tablename__ = "vendor_metadata"
+
+    id: int = Column(Integer, primary_key=True)
+    org_name: str = Column(String(255), nullable=False, unique=True)
+    website: Optional[str] = Column(String(255), nullable=True)
+    industry: Optional[str] = Column(String(100), nullable=True)
+    founded_year: Optional[int] = Column(Integer, nullable=True)
+    employee_count: Optional[str] = Column(String(50), nullable=True)
+    headquarters_country: Optional[str] = Column(String(2), nullable=True)
+    breach_history: int = Column(Integer, default=0)
+    last_breach_date: Optional[datetime] = Column(DateTime, nullable=True)
+    breach_summary: Optional[str] = Column(String(1000), nullable=True)
+    mean_time_to_repair: Optional[int] = Column(Integer, nullable=True)
+    mean_time_to_detect: Optional[int] = Column(Integer, nullable=True)
+    security_score: Optional[int] = Column(Integer, nullable=True)
+    reputation_score: Optional[int] = Column(Integer, nullable=True)
+    notes: Optional[str] = Column(String(2000), nullable=True)
+    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+    updated_at: datetime = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<VendorMetadata(org={self.org_name}, breaches={self.breach_history})>"
+        )
+
+
+class DataLeak(Base):
+    """Leaked credentials and breach data.
+
+    Tracks exposed emails and passwords from data breaches.
+    """
+
+    __tablename__ = "data_leaks"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    email: str = Column(String(255), nullable=False)
+    breach_name: str = Column(String(255), nullable=False)
+    breach_date: Optional[datetime] = Column(DateTime, nullable=True)
+    exposed_data: Optional[str] = Column(String(500), nullable=True)
+    password_hash: Optional[str] = Column(String(255), nullable=True)
+    source_url: Optional[str] = Column(String(500), nullable=True)
+    is_verified: bool = Column(Boolean, default=False)
+    is_exploited: bool = Column(Boolean, default=False)
+    credentials_tested: bool = Column(Boolean, default=False)
+    exploit_date: Optional[datetime] = Column(DateTime, nullable=True)
+
+    # Relationships
+    scan_run = relationship("ScanRun", backref="data_leaks")
+
+    __table_args__ = (
+        Index("idx_data_leaks_email_breach", "email", "breach_date"),
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return f"<DataLeak(email={self.email}, breach={self.breach_name})>"
+
+
+class ActiveExploit(Base):
+    """Public exploits for vulnerabilities.
+
+    Tracks Metasploit modules, PoCs, and active exploitation status.
+    """
+
+    __tablename__ = "active_exploits"
+
+    id: int = Column(Integer, primary_key=True)
+    vulnerability_id: int = Column(
+        Integer, ForeignKey("vulnerabilities.id"), nullable=False, index=True
+    )
+    cve_id: Optional[str] = Column(String(50), nullable=True)
+    exploit_id: Optional[str] = Column(String(100), nullable=True)
+    exploit_title: str = Column(String(255), nullable=False)
+    exploit_source: str = Column(String(100), nullable=False)
+    exploit_type: Optional[str] = Column(String(50), nullable=True)
+    release_date: Optional[datetime] = Column(DateTime, nullable=True)
+    is_public: bool = Column(Boolean, default=True)
+    is_actively_exploited: bool = Column(Boolean, default=False)
+    exploitation_reports: int = Column(Integer, default=0)
+    proof_of_concept: bool = Column(Boolean, default=False)
+    proof_of_concept_url: Optional[str] = Column(String(500), nullable=True)
+    difficulty: Optional[str] = Column(String(20), nullable=True)
+    popularity_score: Optional[int] = Column(Integer, nullable=True)
+    last_updated: datetime = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    vulnerability = relationship("Vulnerability", backref="active_exploits")
+
+    __table_args__ = (
+        Index("idx_active_exploits_vuln_source", "vulnerability_id", "exploit_source"),
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return f"<ActiveExploit(cve={self.cve_id}, source={self.exploit_source})>"
+
+
+class MalwareIndicator(Base):
+    """Malware indicators (hashes, domains, IPs).
+
+    Tracks IOCs from threat feeds.
+    """
+
+    __tablename__ = "malware_indicators"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    indicator_type: str = Column(String(50), nullable=False)
+    indicator_value: str = Column(String(500), nullable=False)
+    hash_type: Optional[str] = Column(String(10), nullable=True)
+    malware_family: Optional[str] = Column(String(100), nullable=True)
+    yara_rule: Optional[str] = Column(String(1000), nullable=True)
+    detection_count: int = Column(Integer, default=0)
+    first_submission: Optional[datetime] = Column(DateTime, nullable=True)
+    last_analysis: datetime = Column(DateTime, default=datetime.utcnow)
+    verdict: Optional[str] = Column(String(50), nullable=True)
+    analyzed_by: Optional[str] = Column(String(100), nullable=True)
+
+    # Relationships
+    scan_run = relationship("ScanRun", backref="malware_indicators")
+
+    __table_args__ = (
+        Index("idx_malware_type_value", "indicator_type", "indicator_value"),
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<MalwareIndicator(type={self.indicator_type}, "
+            f"value={self.indicator_value[:30]})>"
+        )
+
+
+class ComplianceEvidence(Base):
+    """Evidence linking findings to compliance controls.
+
+    Tracks remediation and verification for audit trails.
+    """
+
+    __tablename__ = "compliance_evidence"
+
+    id: int = Column(Integer, primary_key=True)
+    compliance_report_id: int = Column(
+        Integer, ForeignKey("compliance_reports.id"), nullable=False, index=True
+    )
+    compliance_finding_id: Optional[int] = Column(
+        Integer, ForeignKey("compliance_findings.id"), nullable=True, index=True
+    )
+    vulnerability_id: Optional[int] = Column(
+        Integer, ForeignKey("vulnerabilities.id"), nullable=True, index=True
+    )
+    evidence_type: str = Column(String(50), nullable=False)
+    description: str = Column(String(1000), nullable=False)
+    evidence_file: Optional[str] = Column(String(255), nullable=True)
+    collected_date: datetime = Column(DateTime, default=datetime.utcnow)
+    verified: bool = Column(Boolean, default=False)
+    verifier_name: Optional[str] = Column(String(255), nullable=True)
+    verification_date: Optional[datetime] = Column(DateTime, nullable=True)
+
+    # Relationships
+    compliance_report = relationship("ComplianceReport", backref="compliance_evidence_items")
+    compliance_finding = relationship("ComplianceFinding", backref="compliance_evidence_items")
+    vulnerability = relationship("Vulnerability", backref="compliance_evidence")
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<ComplianceEvidence(report_id={self.compliance_report_id}, "
+            f"type={self.evidence_type})>"
+        )
+
+
+class BaselineSnapshot(Base):
+    """Scan snapshot for baseline comparison and change detection.
+
+    Used for drift analysis between scan runs.
+    """
+
+    __tablename__ = "baseline_snapshots"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    snapshot_date: datetime = Column(DateTime, default=datetime.utcnow)
+    is_baseline: bool = Column(Boolean, default=False)
+    asset_count: Optional[int] = Column(Integer, nullable=True)
+    subdomain_count: Optional[int] = Column(Integer, nullable=True)
+    port_count: Optional[int] = Column(Integer, nullable=True)
+    vulnerability_count: Optional[int] = Column(Integer, nullable=True)
+    technology_count: Optional[int] = Column(Integer, nullable=True)
+    risk_score_snapshot: Optional[int] = Column(Integer, nullable=True)
+    snapshot_data: Optional[str] = Column(Text, nullable=True)
+    md5_hash: Optional[str] = Column(String(32), nullable=True)
+
+    # Relationships
+    scan_run = relationship("ScanRun", backref="baseline_snapshots")
+
+    __table_args__ = (
+        Index("idx_baseline_scan_flag", "scan_run_id", "is_baseline"),
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<BaselineSnapshot(scan_run_id={self.scan_run_id}, "
+            f"is_baseline={self.is_baseline})>"
+        )
+
+
+class ScanProgress(Base):
+    """Real-time scan progress tracking.
+
+    Updated during execution for monitoring dashboards.
+    """
+
+    __tablename__ = "scan_progress"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, unique=True, index=True
+    )
+    current_phase: int = Column(Integer, default=0)
+    current_tool: Optional[str] = Column(String(100), nullable=True)
+    progress_percentage: int = Column(Integer, default=0)
+    status: str = Column(String(50), default="queued")
+    subdomains_found: int = Column(Integer, default=0)
+    ports_found: int = Column(Integer, default=0)
+    vulnerabilities_found: int = Column(Integer, default=0)
+    assets_added: int = Column(Integer, default=0)
+    assets_removed: int = Column(Integer, default=0)
+    last_update: datetime = Column(DateTime, default=datetime.utcnow)
+    estimated_completion: Optional[datetime] = Column(DateTime, nullable=True)
+    duration_seconds: Optional[int] = Column(Integer, nullable=True)
+
+    # Relationships
+    scan_run = relationship("ScanRun", backref="scan_progress")
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<ScanProgress(scan_run_id={self.scan_run_id}, "
+            f"phase={self.current_phase}, pct={self.progress_percentage})>"
+        )
+
+
+class CacheEntry(Base):
+    """Query result cache.
+
+    Reduces API calls and speeds up repeated queries.
+    """
+
+    __tablename__ = "cache_entries"
+
+    id: int = Column(Integer, primary_key=True)
+    cache_key: str = Column(String(500), nullable=False, unique=True)
+    cache_value: str = Column(Text, nullable=False)
+    source: str = Column(String(100), nullable=False)
+    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+    expires_at: Optional[datetime] = Column(DateTime, nullable=True)
+    hit_count: int = Column(Integer, default=0)
+    is_expired: bool = Column(Boolean, default=False)
+
+    __table_args__ = (
+        Index("idx_cache_key_expires", "cache_key", "expires_at"),
+    )
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return (
+            f"<CacheEntry(key={self.cache_key[:30]}, source={self.source})>"
+        )
+
+
+class Webhook(Base):
+    """Webhook configuration for event notifications.
+
+    Supports filtering by event types and stores delivery history.
+    """
+
+    __tablename__ = "webhooks"
+
+    id: int = Column(Integer, primary_key=True)
+    url: str = Column(String(500), nullable=False)
+    events: str = Column(String(500), nullable=False)  # Comma-separated event types
+    secret: Optional[str] = Column(String(255), nullable=True)
+    active: bool = Column(Boolean, default=True)
+    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+    created_by: Optional[str] = Column(String(255), nullable=True)
+    last_triggered: Optional[datetime] = Column(DateTime, nullable=True)
+    success_count: int = Column(Integer, default=0)
+    failure_count: int = Column(Integer, default=0)
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return f"<Webhook(id={self.id}, url={self.url[:50]}, active={self.active})>"
+
+
+# ---------------------------------------------------------------------------
+# Queue & Event Models (added Round 6 — prod hardening)
+# ---------------------------------------------------------------------------
+
+
+class ScanJob(Base):
+    """Persistent job queue record — one row per enqueued scan execution.
+
+    The Python worker polls this table for ``status='queued'`` rows, claims
+    one atomically, and transitions it through queued → running → done/failed.
+    """
+
+    __tablename__ = "scan_jobs"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    status: str = Column(String(20), nullable=False, default="queued", index=True)
+    worker_id: Optional[str] = Column(String(100), nullable=True)
+    queued_at: datetime = Column(DateTime, default=datetime.utcnow)
+    started_at: Optional[datetime] = Column(DateTime, nullable=True)
+    finished_at: Optional[datetime] = Column(DateTime, nullable=True)
+    error: Optional[str] = Column(Text, nullable=True)
+
+    scan_run = relationship("ScanRun", backref="scan_jobs")
+
+    __table_args__ = (
+        Index("idx_scan_jobs_status_id", "status", "id"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ScanJob(id={self.id}, scan_run_id={self.scan_run_id}, "
+            f"status={self.status})>"
+        )
+
+
+class ScanEvent(Base):
+    """Persisted scan event / log line for real-time streaming.
+
+    The worker writes one row per output line from the scan harness.
+    The SSE stream endpoint reads rows with ``id > last_seen_id`` and
+    delivers them to the client — no synthetic data, no mocks.
+    """
+
+    __tablename__ = "scan_events"
+
+    id: int = Column(Integer, primary_key=True)
+    scan_run_id: int = Column(
+        Integer, ForeignKey("scan_runs.id"), nullable=False, index=True
+    )
+    event_type: str = Column(String(50), nullable=False, default="log")
+    level: str = Column(String(20), nullable=False, default="info")
+    message: Optional[str] = Column(Text, nullable=True)
+    data: Optional[str] = Column(Text, nullable=True)  # JSON-serialized extra fields
+    phase: Optional[int] = Column(Integer, nullable=True)
+    created_at: datetime = Column(DateTime, default=datetime.utcnow)
+
+    scan_run = relationship("ScanRun", backref="scan_events")
+
+    __table_args__ = (
+        Index("idx_scan_events_run_id", "scan_run_id", "id"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ScanEvent(id={self.id}, scan_run_id={self.scan_run_id}, "
+            f"type={self.event_type})>"
+        )
+
+
+
+# >>> backend/db/models.py
+
+"""Compatibility shim — canonical implementation is in app.db.models."""
+from app.db.models import *  # noqa: F401, F403
+
+
+# >>> backend/db/database.py
+
+"""Compatibility shim — canonical implementation is in app.db.database."""
+from app.db.database import *  # noqa: F401, F403
+
+
+# >>> backend/db/__init__.py
+
+"""Compatibility shim — canonical implementation is in app.db."""
+from app.db import *  # noqa: F401, F403
+
+
+# >>> backend/db/base.py
+
+"""Compatibility shim — canonical implementation is in app.db.base."""
+from app.db.base import *  # noqa: F401, F403
+
+
+# >>> backend/db/tests/__init__.py
+
+"""Database model tests."""
+
+
+# >>> backend/db/tests/test_models.py
+
+"""Comprehensive tests for all 25 ReconX database models.
+
+Tests cover: model creation, default values, repr methods,
+nullable constraints, relationships, composite indexes,
+and unique constraints. Uses in-memory SQLite for speed.
+"""
+
+from datetime import datetime
+
+import pytest
+from sqlalchemy import create_engine, inspect
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.db.base import Base
+from app.db.models import (
+    APIKey,
+    AssetChange,
+    AssetSnapshot,
+    AuditLog,
+    ChangeNotification,
+    ComplianceFinding,
+    ComplianceReport,
+    DNSRecord,
+    DomainTechnology,
+    HTTPHeader,
+    ISPLocation,
+    KnownVulnerability,
+    PortScan,
+    RiskScore,
+    SavedReport,
+    ScannerIntegration,
+    ScanRun,
+    ScanRunnerMetadata,
+    ScheduledScan,
+    Subdomain,
+    Technology,
+    ThreatIntelData,
+    Vulnerability,
+    VulnerabilityMetadata,
+    WebsiteSnapshot,
+)
+
+
+@pytest.fixture()
+def engine():
+    """Create an in-memory SQLite engine with all tables."""
+    eng = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(eng)
+    return eng
+
+
+@pytest.fixture()
+def session(engine) -> Session:
+    """Provide a transactional database session."""
+    factory = sessionmaker(bind=engine)
+    sess = factory()
+    yield sess
+    sess.close()
+
+
+# ---------------------------------------------------------------------------
+# Helper: create a full scan hierarchy for relationship tests
+# ---------------------------------------------------------------------------
+
+
+def _create_scan_run(session: Session, domain: str = "example.com") -> ScanRun:
+    """Insert and return a ScanRun."""
+    scan = ScanRun(domain=domain)
+    session.add(scan)
+    session.commit()
+    return scan
+
+
+def _create_subdomain(
+    session: Session, scan_run: ScanRun, name: str = "api.example.com"
+) -> Subdomain:
+    """Insert and return a Subdomain."""
+    sub = Subdomain(scan_run_id=scan_run.id, subdomain=name, is_alive=True)
+    session.add(sub)
+    session.commit()
+    return sub
+
+
+# ---------------------------------------------------------------------------
+# Group 1: Core Scanning Models
+# ---------------------------------------------------------------------------
+
+
+class TestScanRun:
+    """Tests for the ScanRun model."""
+
+    def test_creation_with_defaults(self, session: Session) -> None:
+        scan = ScanRun(domain="example.com")
+        session.add(scan)
+        session.commit()
+
+        assert scan.id is not None
+        assert scan.domain == "example.com"
+        assert scan.scan_type == "full"
+        assert scan.status == "pending"
+        assert scan.phase == 0
+        assert scan.risk_score is None
+        assert scan.completed_at is None
+        assert isinstance(scan.created_at, datetime)
+
+    def test_creation_with_custom_values(self, session: Session) -> None:
+        scan = ScanRun(
+            domain="test.org",
+            scan_type="quick",
+            status="running",
+            phase=3,
+            risk_score=75,
+        )
+        session.add(scan)
+        session.commit()
+
+        assert scan.scan_type == "quick"
+        assert scan.status == "running"
+        assert scan.phase == 3
+        assert scan.risk_score == 75
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        r = repr(scan)
+        assert "ScanRun" in r
+        assert "example.com" in r
+        assert "pending" in r
+
+    def test_subdomains_relationship(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = Subdomain(scan_run_id=scan.id, subdomain="www.example.com")
+        session.add(sub)
+        session.commit()
+
+        assert len(scan.subdomains) == 1
+        assert scan.subdomains[0].subdomain == "www.example.com"
+        assert sub.scan_run.domain == "example.com"
+
+
+class TestSubdomain:
+    """Tests for the Subdomain model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = Subdomain(
+            scan_run_id=scan.id,
+            subdomain="api.example.com",
+            is_alive=True,
+            discovered_method="passive",
+        )
+        session.add(sub)
+        session.commit()
+
+        assert sub.id is not None
+        assert sub.is_alive is True
+        assert sub.discovered_method == "passive"
+        assert sub.priority == 0
+
+    def test_defaults(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = Subdomain(scan_run_id=scan.id, subdomain="mail.example.com")
+        session.add(sub)
+        session.commit()
+
+        assert sub.is_alive is False
+        assert sub.priority == 0
+        assert sub.last_seen is None
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = _create_subdomain(session, scan)
+        r = repr(sub)
+        assert "Subdomain" in r
+        assert "api.example.com" in r
+
+    def test_port_scans_relationship(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = _create_subdomain(session, scan)
+        port = PortScan(subdomain_id=sub.id, port=443, state="open")
+        session.add(port)
+        session.commit()
+
+        assert len(sub.port_scans) == 1
+        assert sub.port_scans[0].port == 443
+
+
+class TestPortScan:
+    """Tests for the PortScan model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = _create_subdomain(session, scan)
+        port = PortScan(
+            subdomain_id=sub.id,
+            port=80,
+            protocol="tcp",
+            state="open",
+            service="HTTP",
+            version="Apache 2.4.41",
+        )
+        session.add(port)
+        session.commit()
+
+        assert port.id is not None
+        assert port.service == "HTTP"
+        assert port.version == "Apache 2.4.41"
+
+    def test_defaults(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = _create_subdomain(session, scan)
+        port = PortScan(subdomain_id=sub.id, port=22)
+        session.add(port)
+        session.commit()
+
+        assert port.protocol == "tcp"
+        assert port.state == "closed"
+        assert port.service is None
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = _create_subdomain(session, scan)
+        port = PortScan(
+            subdomain_id=sub.id, port=443, state="open", service="HTTPS"
+        )
+        session.add(port)
+        session.commit()
+        r = repr(port)
+        assert "PortScan" in r
+        assert "443" in r
+
+
+class TestVulnerability:
+    """Tests for the Vulnerability model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        vuln = Vulnerability(
+            scan_run_id=scan.id,
+            vuln_type="xss",
+            title="Reflected XSS in search",
+            severity=65,
+            description="User input reflected without encoding",
+            remediation="Sanitize output with HTML encoding",
+            cve_ids="CVE-2021-1234",
+        )
+        session.add(vuln)
+        session.commit()
+
+        assert vuln.id is not None
+        assert vuln.vuln_type == "xss"
+        assert vuln.severity == 65
+
+    def test_nullable_foreign_keys(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        vuln = Vulnerability(
+            scan_run_id=scan.id, vuln_type="weak_cipher", title="Weak TLS"
+        )
+        session.add(vuln)
+        session.commit()
+
+        assert vuln.subdomain_id is None
+        assert vuln.port_scan_id is None
+
+    def test_scan_run_relationship(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        vuln = Vulnerability(
+            scan_run_id=scan.id, vuln_type="sqli", title="SQL Injection"
+        )
+        session.add(vuln)
+        session.commit()
+
+        assert len(scan.vulnerabilities) == 1
+        assert vuln.scan_run.domain == "example.com"
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        vuln = Vulnerability(
+            scan_run_id=scan.id,
+            vuln_type="rfi",
+            title="Remote File Include",
+            severity=90,
+        )
+        session.add(vuln)
+        session.commit()
+        r = repr(vuln)
+        assert "Vulnerability" in r
+        assert "rfi" in r
+
+
+class TestHTTPHeader:
+    """Tests for the HTTPHeader model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = _create_subdomain(session, scan)
+        header = HTTPHeader(
+            subdomain_id=sub.id,
+            header_name="Server",
+            header_value="nginx/1.18.0",
+        )
+        session.add(header)
+        session.commit()
+
+        assert header.id is not None
+        assert header.header_name == "Server"
+
+    def test_repr_truncates_value(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = _create_subdomain(session, scan)
+        long_value = "A" * 200
+        header = HTTPHeader(
+            subdomain_id=sub.id,
+            header_name="X-Custom",
+            header_value=long_value,
+        )
+        session.add(header)
+        session.commit()
+        r = repr(header)
+        assert "HTTPHeader" in r
+        assert len(r) < 200
+
+    def test_subdomain_relationship(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = _create_subdomain(session, scan)
+        h1 = HTTPHeader(
+            subdomain_id=sub.id,
+            header_name="Server",
+            header_value="nginx",
+        )
+        h2 = HTTPHeader(
+            subdomain_id=sub.id,
+            header_name="X-Powered-By",
+            header_value="PHP/7.4",
+        )
+        session.add_all([h1, h2])
+        session.commit()
+
+        assert len(sub.http_headers) == 2
+
+
+# ---------------------------------------------------------------------------
+# Group 2: Intelligence Models
+# ---------------------------------------------------------------------------
+
+
+class TestTechnology:
+    """Tests for the Technology model."""
+
+    def test_creation(self, session: Session) -> None:
+        tech = Technology(
+            name="Apache", category="web_server", type="software"
+        )
+        session.add(tech)
+        session.commit()
+        assert tech.id is not None
+        assert tech.name == "Apache"
+
+    def test_unique_name(self, session: Session) -> None:
+        t1 = Technology(name="Nginx", category="web_server", type="software")
+        session.add(t1)
+        session.commit()
+
+        t2 = Technology(name="Nginx", category="proxy", type="software")
+        session.add(t2)
+        with pytest.raises(Exception):
+            session.commit()
+
+    def test_repr(self, session: Session) -> None:
+        tech = Technology(
+            name="WordPress", category="cms", type="software"
+        )
+        session.add(tech)
+        session.commit()
+        assert "WordPress" in repr(tech)
+
+
+class TestDomainTechnology:
+    """Tests for the DomainTechnology junction model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        tech = Technology(
+            name="React", category="framework", type="library"
+        )
+        session.add(tech)
+        session.commit()
+
+        dt = DomainTechnology(
+            scan_run_id=scan.id,
+            technology_id=tech.id,
+            version="18.2.0",
+            confidence=95,
+        )
+        session.add(dt)
+        session.commit()
+
+        assert dt.id is not None
+        assert dt.confidence == 95
+
+    def test_relationships(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        tech = Technology(
+            name="Django", category="framework", type="software"
+        )
+        session.add(tech)
+        session.commit()
+
+        dt = DomainTechnology(
+            scan_run_id=scan.id, technology_id=tech.id
+        )
+        session.add(dt)
+        session.commit()
+
+        assert dt.scan_run.domain == "example.com"
+        assert dt.technology.name == "Django"
+        assert len(scan.domain_technologies) == 1
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        tech = Technology(name="Vue", category="framework", type="library")
+        session.add(tech)
+        session.commit()
+        dt = DomainTechnology(
+            scan_run_id=scan.id, technology_id=tech.id, version="3.0"
+        )
+        session.add(dt)
+        session.commit()
+        assert "DomainTechnology" in repr(dt)
+
+
+class TestVulnerabilityMetadata:
+    """Tests for the VulnerabilityMetadata model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        vuln = Vulnerability(
+            scan_run_id=scan.id, vuln_type="rce", title="Remote Code Exec"
+        )
+        session.add(vuln)
+        session.commit()
+
+        meta = VulnerabilityMetadata(
+            vulnerability_id=vuln.id,
+            cve_id="CVE-2021-44228",
+            cvss_v31_score=10.0,
+            cvss_v31_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+            epss_score=0.975,
+            in_kev=True,
+            has_metasploit=True,
+            active_exploitation=True,
+            days_since_published=365,
+            source="nuclei",
+        )
+        session.add(meta)
+        session.commit()
+
+        assert meta.cvss_v31_score == 10.0
+        assert meta.in_kev is True
+        assert meta.epss_score == 0.975
+
+    def test_defaults(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        vuln = Vulnerability(
+            scan_run_id=scan.id, vuln_type="info", title="Info Disclosure"
+        )
+        session.add(vuln)
+        session.commit()
+
+        meta = VulnerabilityMetadata(vulnerability_id=vuln.id)
+        session.add(meta)
+        session.commit()
+
+        assert meta.in_kev is False
+        assert meta.has_metasploit is False
+        assert meta.active_exploitation is False
+
+    def test_relationship(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        vuln = Vulnerability(
+            scan_run_id=scan.id, vuln_type="xss", title="Stored XSS"
+        )
+        session.add(vuln)
+        session.commit()
+
+        meta = VulnerabilityMetadata(
+            vulnerability_id=vuln.id, cve_id="CVE-2023-0001"
+        )
+        session.add(meta)
+        session.commit()
+
+        assert len(vuln.vuln_metadata) == 1
+        assert vuln.vuln_metadata[0].cve_id == "CVE-2023-0001"
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        vuln = Vulnerability(
+            scan_run_id=scan.id, vuln_type="lfi", title="LFI"
+        )
+        session.add(vuln)
+        session.commit()
+        meta = VulnerabilityMetadata(
+            vulnerability_id=vuln.id,
+            cve_id="CVE-2024-9999",
+            cvss_v31_score=7.5,
+        )
+        session.add(meta)
+        session.commit()
+        assert "CVE-2024-9999" in repr(meta)
+
+
+class TestDNSRecord:
+    """Tests for the DNSRecord model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        dns = DNSRecord(
+            scan_run_id=scan.id,
+            domain="example.com",
+            record_type="A",
+            value="93.184.216.34",
+            ttl=3600,
+        )
+        session.add(dns)
+        session.commit()
+
+        assert dns.id is not None
+        assert dns.record_type == "A"
+        assert dns.ttl == 3600
+
+    def test_relationship(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        dns = DNSRecord(
+            scan_run_id=scan.id,
+            domain="example.com",
+            record_type="MX",
+            value="mail.example.com",
+        )
+        session.add(dns)
+        session.commit()
+
+        assert len(scan.dns_records) == 1
+        assert dns.scan_run.domain == "example.com"
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        dns = DNSRecord(
+            scan_run_id=scan.id,
+            domain="example.com",
+            record_type="CNAME",
+            value="cdn.example.com",
+        )
+        session.add(dns)
+        session.commit()
+        assert "CNAME" in repr(dns)
+
+
+class TestISPLocation:
+    """Tests for the ISPLocation model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        loc = ISPLocation(
+            scan_run_id=scan.id,
+            ip_address="93.184.216.34",
+            isp_name="Edgecast",
+            country="US",
+            region="California",
+            city="Los Angeles",
+            latitude=34.0522,
+            longitude=-118.2437,
+        )
+        session.add(loc)
+        session.commit()
+
+        assert loc.id is not None
+        assert loc.latitude == 34.0522
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        loc = ISPLocation(
+            scan_run_id=scan.id,
+            ip_address="1.2.3.4",
+            country="DE",
+        )
+        session.add(loc)
+        session.commit()
+        assert "1.2.3.4" in repr(loc)
+
+
+class TestThreatIntelData:
+    """Tests for the ThreatIntelData model."""
+
+    def test_creation_standalone(self, session: Session) -> None:
+        ti = ThreatIntelData(
+            indicator_type="ip",
+            indicator_value="192.168.1.100",
+            severity=85,
+            source="AbuseIPDB",
+            description="Known C2 server",
+        )
+        session.add(ti)
+        session.commit()
+
+        assert ti.id is not None
+        assert ti.vulnerability_id is None
+
+    def test_linked_to_vulnerability(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        vuln = Vulnerability(
+            scan_run_id=scan.id, vuln_type="c2", title="C2 Communication"
+        )
+        session.add(vuln)
+        session.commit()
+
+        ti = ThreatIntelData(
+            vulnerability_id=vuln.id,
+            indicator_type="domain",
+            indicator_value="evil.example.com",
+            source="VirusTotal",
+        )
+        session.add(ti)
+        session.commit()
+
+        assert len(vuln.threat_intel) == 1
+        assert ti.vulnerability.title == "C2 Communication"
+
+    def test_repr(self, session: Session) -> None:
+        ti = ThreatIntelData(
+            indicator_type="file_hash",
+            indicator_value="abc123",
+            source="GreyNoise",
+        )
+        session.add(ti)
+        session.commit()
+        assert "file_hash" in repr(ti)
+
+
+# ---------------------------------------------------------------------------
+# Group 3: Compliance & Reporting Models
+# ---------------------------------------------------------------------------
+
+
+class TestComplianceReport:
+    """Tests for the ComplianceReport model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        report = ComplianceReport(
+            scan_run_id=scan.id,
+            report_type="pci-dss",
+            passed_checks=45,
+            failed_checks=5,
+            overall_score=90,
+        )
+        session.add(report)
+        session.commit()
+
+        assert report.id is not None
+        assert report.overall_score == 90
+
+    def test_relationship(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        report = ComplianceReport(
+            scan_run_id=scan.id, report_type="hipaa"
+        )
+        session.add(report)
+        session.commit()
+
+        assert len(scan.compliance_reports) == 1
+        assert report.scan_run.domain == "example.com"
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        report = ComplianceReport(
+            scan_run_id=scan.id,
+            report_type="gdpr",
+            overall_score=78,
+        )
+        session.add(report)
+        session.commit()
+        assert "gdpr" in repr(report)
+
+
+class TestComplianceFinding:
+    """Tests for the ComplianceFinding model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        report = ComplianceReport(
+            scan_run_id=scan.id, report_type="pci-dss"
+        )
+        session.add(report)
+        session.commit()
+
+        finding = ComplianceFinding(
+            report_id=report.id,
+            requirement_id="PCI-DSS-6.2",
+            control_name="Patch Management",
+            status="failed",
+            severity="high",
+            remediation="Apply latest security patches",
+        )
+        session.add(finding)
+        session.commit()
+
+        assert finding.id is not None
+        assert finding.status == "failed"
+
+    def test_relationship(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        report = ComplianceReport(
+            scan_run_id=scan.id, report_type="iso27001"
+        )
+        session.add(report)
+        session.commit()
+
+        f1 = ComplianceFinding(
+            report_id=report.id,
+            requirement_id="A.12.6.1",
+            control_name="Technical Vulnerability Mgmt",
+            status="passed",
+        )
+        f2 = ComplianceFinding(
+            report_id=report.id,
+            requirement_id="A.14.2.5",
+            control_name="Secure Development",
+            status="failed",
+        )
+        session.add_all([f1, f2])
+        session.commit()
+
+        assert len(report.findings) == 2
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        report = ComplianceReport(
+            scan_run_id=scan.id, report_type="soc2"
+        )
+        session.add(report)
+        session.commit()
+        finding = ComplianceFinding(
+            report_id=report.id,
+            requirement_id="CC6.1",
+            control_name="Logical Access",
+            status="passed",
+        )
+        session.add(finding)
+        session.commit()
+        assert "CC6.1" in repr(finding)
+
+
+class TestRiskScore:
+    """Tests for the RiskScore model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        score = RiskScore(
+            scan_run_id=scan.id,
+            calculation_method="v2.0",
+            critical_count=2,
+            high_count=5,
+            medium_count=12,
+            low_count=30,
+            overall_score=78,
+        )
+        session.add(score)
+        session.commit()
+
+        assert score.id is not None
+        assert score.overall_score == 78
+        assert score.critical_count == 2
+
+    def test_defaults(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        score = RiskScore(
+            scan_run_id=scan.id, calculation_method="v1.0"
+        )
+        session.add(score)
+        session.commit()
+
+        assert score.critical_count == 0
+        assert score.overall_score == 0
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        score = RiskScore(
+            scan_run_id=scan.id,
+            calculation_method="v2.0",
+            overall_score=55,
+        )
+        session.add(score)
+        session.commit()
+        assert "55" in repr(score)
+
+
+class TestAuditLog:
+    """Tests for the AuditLog model."""
+
+    def test_creation(self, session: Session) -> None:
+        log = AuditLog(
+            user="admin@reconx.io",
+            action="created_scan",
+            entity_type="ScanRun",
+            entity_id=1,
+            details='{"domain": "example.com"}',
+        )
+        session.add(log)
+        session.commit()
+
+        assert log.id is not None
+        assert isinstance(log.timestamp, datetime)
+
+    def test_system_user(self, session: Session) -> None:
+        log = AuditLog(
+            user="system",
+            action="auto_scan",
+            entity_type="ScheduledScan",
+        )
+        session.add(log)
+        session.commit()
+
+        assert log.entity_id is None
+        assert log.details is None
+
+    def test_repr(self, session: Session) -> None:
+        log = AuditLog(
+            user="test", action="view", entity_type="Report"
+        )
+        session.add(log)
+        session.commit()
+        assert "test" in repr(log)
+
+
+class TestAssetSnapshot:
+    """Tests for the AssetSnapshot model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        snap = AssetSnapshot(
+            scan_run_id=scan.id,
+            subdomain_count=150,
+            open_port_count=42,
+            vulnerability_count=18,
+            critical_vuln_count=3,
+        )
+        session.add(snap)
+        session.commit()
+
+        assert snap.id is not None
+        assert snap.subdomain_count == 150
+
+    def test_defaults(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        snap = AssetSnapshot(scan_run_id=scan.id)
+        session.add(snap)
+        session.commit()
+
+        assert snap.domain_count == 0
+        assert snap.critical_vuln_count == 0
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        snap = AssetSnapshot(
+            scan_run_id=scan.id, vulnerability_count=5
+        )
+        session.add(snap)
+        session.commit()
+        assert "AssetSnapshot" in repr(snap)
+
+
+# ---------------------------------------------------------------------------
+# Group 4: Change Tracking Models
+# ---------------------------------------------------------------------------
+
+
+class TestAssetChange:
+    """Tests for the AssetChange model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        snap1 = AssetSnapshot(scan_run_id=scan.id, subdomain_count=10)
+        snap2 = AssetSnapshot(scan_run_id=scan.id, subdomain_count=15)
+        session.add_all([snap1, snap2])
+        session.commit()
+
+        change = AssetChange(
+            previous_snapshot_id=snap1.id,
+            current_snapshot_id=snap2.id,
+            change_type="new",
+            asset_type="subdomain",
+            description="5 new subdomains discovered",
+            severity="medium",
+        )
+        session.add(change)
+        session.commit()
+
+        assert change.id is not None
+        assert change.change_type == "new"
+
+    def test_snapshot_relationships(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        snap1 = AssetSnapshot(scan_run_id=scan.id)
+        snap2 = AssetSnapshot(scan_run_id=scan.id)
+        session.add_all([snap1, snap2])
+        session.commit()
+
+        change = AssetChange(
+            previous_snapshot_id=snap1.id,
+            current_snapshot_id=snap2.id,
+            change_type="removed",
+            asset_type="port",
+        )
+        session.add(change)
+        session.commit()
+
+        assert change.previous_snapshot.id == snap1.id
+        assert change.current_snapshot.id == snap2.id
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        snap1 = AssetSnapshot(scan_run_id=scan.id)
+        snap2 = AssetSnapshot(scan_run_id=scan.id)
+        session.add_all([snap1, snap2])
+        session.commit()
+        change = AssetChange(
+            previous_snapshot_id=snap1.id,
+            current_snapshot_id=snap2.id,
+            change_type="modified",
+            asset_type="vulnerability",
+        )
+        session.add(change)
+        session.commit()
+        assert "modified" in repr(change)
+
+
+class TestChangeNotification:
+    """Tests for the ChangeNotification model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        snap1 = AssetSnapshot(scan_run_id=scan.id)
+        snap2 = AssetSnapshot(scan_run_id=scan.id)
+        session.add_all([snap1, snap2])
+        session.commit()
+
+        change = AssetChange(
+            previous_snapshot_id=snap1.id,
+            current_snapshot_id=snap2.id,
+            change_type="new",
+            asset_type="vulnerability",
+        )
+        session.add(change)
+        session.commit()
+
+        notif = ChangeNotification(
+            asset_change_id=change.id,
+            notification_type="email",
+            recipient="security@example.com",
+            status="sent",
+        )
+        session.add(notif)
+        session.commit()
+
+        assert notif.id is not None
+        assert notif.status == "sent"
+
+    def test_default_status(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        snap1 = AssetSnapshot(scan_run_id=scan.id)
+        snap2 = AssetSnapshot(scan_run_id=scan.id)
+        session.add_all([snap1, snap2])
+        session.commit()
+
+        change = AssetChange(
+            previous_snapshot_id=snap1.id,
+            current_snapshot_id=snap2.id,
+            change_type="new",
+            asset_type="port",
+        )
+        session.add(change)
+        session.commit()
+
+        notif = ChangeNotification(
+            asset_change_id=change.id,
+            notification_type="slack",
+            recipient="#security",
+        )
+        session.add(notif)
+        session.commit()
+
+        assert notif.status == "pending"
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        snap1 = AssetSnapshot(scan_run_id=scan.id)
+        snap2 = AssetSnapshot(scan_run_id=scan.id)
+        session.add_all([snap1, snap2])
+        session.commit()
+        change = AssetChange(
+            previous_snapshot_id=snap1.id,
+            current_snapshot_id=snap2.id,
+            change_type="new",
+            asset_type="subdomain",
+        )
+        session.add(change)
+        session.commit()
+        notif = ChangeNotification(
+            asset_change_id=change.id,
+            notification_type="webhook",
+            recipient="https://hooks.example.com/abc",
+        )
+        session.add(notif)
+        session.commit()
+        assert "webhook" in repr(notif)
+
+
+class TestWebsiteSnapshot:
+    """Tests for the WebsiteSnapshot model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = _create_subdomain(session, scan)
+        ws = WebsiteSnapshot(
+            subdomain_id=sub.id,
+            http_status=200,
+            content_hash="a" * 64,
+            screenshot_path="/screenshots/example.png",
+            crawl_depth=3,
+        )
+        session.add(ws)
+        session.commit()
+
+        assert ws.id is not None
+        assert ws.http_status == 200
+        assert ws.crawl_depth == 3
+
+    def test_relationship(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = _create_subdomain(session, scan)
+        ws = WebsiteSnapshot(subdomain_id=sub.id, http_status=301)
+        session.add(ws)
+        session.commit()
+
+        assert len(sub.website_snapshots) == 1
+        assert ws.subdomain.subdomain == "api.example.com"
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        sub = _create_subdomain(session, scan)
+        ws = WebsiteSnapshot(subdomain_id=sub.id, http_status=404)
+        session.add(ws)
+        session.commit()
+        assert "404" in repr(ws)
+
+
+# ---------------------------------------------------------------------------
+# Group 5: Integration & System Models
+# ---------------------------------------------------------------------------
+
+
+class TestScannerIntegration:
+    """Tests for the ScannerIntegration model."""
+
+    def test_creation(self, session: Session) -> None:
+        scanner = ScannerIntegration(
+            name="Nmap",
+            api_endpoint="unix:///var/run/nmap.sock",
+            status="active",
+        )
+        session.add(scanner)
+        session.commit()
+
+        assert scanner.id is not None
+        assert scanner.status == "active"
+
+    def test_defaults(self, session: Session) -> None:
+        scanner = ScannerIntegration(name="Nuclei")
+        session.add(scanner)
+        session.commit()
+
+        assert scanner.status == "active"
+        assert scanner.api_endpoint is None
+        assert scanner.error_message is None
+
+    def test_unique_name(self, session: Session) -> None:
+        s1 = ScannerIntegration(name="Burp")
+        session.add(s1)
+        session.commit()
+
+        s2 = ScannerIntegration(name="Burp")
+        session.add(s2)
+        with pytest.raises(Exception):
+            session.commit()
+
+    def test_repr(self, session: Session) -> None:
+        scanner = ScannerIntegration(name="Trivy", status="inactive")
+        session.add(scanner)
+        session.commit()
+        assert "Trivy" in repr(scanner)
+
+
+class TestScanRunnerMetadata:
+    """Tests for the ScanRunnerMetadata model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        scanner = ScannerIntegration(name="Nmap")
+        session.add(scanner)
+        session.commit()
+
+        meta = ScanRunnerMetadata(
+            scan_run_id=scan.id,
+            scanner_integration_id=scanner.id,
+            scanner_name="Nmap",
+            status="completed",
+            raw_results_file="/results/nmap_output.xml",
+        )
+        session.add(meta)
+        session.commit()
+
+        assert meta.id is not None
+        assert meta.status == "completed"
+
+    def test_relationships(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        scanner = ScannerIntegration(name="Nuclei")
+        session.add(scanner)
+        session.commit()
+
+        meta = ScanRunnerMetadata(
+            scan_run_id=scan.id,
+            scanner_integration_id=scanner.id,
+            scanner_name="Nuclei",
+        )
+        session.add(meta)
+        session.commit()
+
+        assert meta.scan_run.domain == "example.com"
+        assert meta.scanner_integration.name == "Nuclei"
+        assert len(scan.scanner_metadata) == 1
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        scanner = ScannerIntegration(name="TestScanner")
+        session.add(scanner)
+        session.commit()
+        meta = ScanRunnerMetadata(
+            scan_run_id=scan.id,
+            scanner_integration_id=scanner.id,
+            scanner_name="TestScanner",
+        )
+        session.add(meta)
+        session.commit()
+        assert "TestScanner" in repr(meta)
+
+
+class TestAPIKey:
+    """Tests for the APIKey model."""
+
+    def test_creation(self, session: Session) -> None:
+        key = APIKey(
+            user_identifier="user@example.com",
+            key_hash="$2b$12$abcdefghijklmnopqrstuv",
+            name="Production Key",
+        )
+        session.add(key)
+        session.commit()
+
+        assert key.id is not None
+        assert key.is_active is True
+        assert key.expires_at is None
+        assert key.last_used is None
+
+    def test_repr(self, session: Session) -> None:
+        key = APIKey(
+            user_identifier="admin",
+            key_hash="hash123",
+            name="Test Key",
+        )
+        session.add(key)
+        session.commit()
+        assert "Test Key" in repr(key)
+
+
+class TestSavedReport:
+    """Tests for the SavedReport model."""
+
+    def test_creation(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        report = SavedReport(
+            scan_run_id=scan.id,
+            report_type="executive_summary",
+            format="pdf",
+            file_path="/reports/exec_summary.pdf",
+            generated_by="admin@reconx.io",
+        )
+        session.add(report)
+        session.commit()
+
+        assert report.id is not None
+        assert report.format == "pdf"
+
+    def test_relationship(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        r1 = SavedReport(
+            scan_run_id=scan.id,
+            report_type="detailed",
+            format="html",
+            file_path="/reports/detailed.html",
+        )
+        r2 = SavedReport(
+            scan_run_id=scan.id,
+            report_type="compliance",
+            format="json",
+            file_path="/reports/compliance.json",
+        )
+        session.add_all([r1, r2])
+        session.commit()
+
+        assert len(scan.saved_reports) == 2
+
+    def test_repr(self, session: Session) -> None:
+        scan = _create_scan_run(session)
+        report = SavedReport(
+            scan_run_id=scan.id,
+            report_type="vuln_list",
+            format="csv",
+            file_path="/reports/vulns.csv",
+        )
+        session.add(report)
+        session.commit()
+        assert "csv" in repr(report)
+
+
+class TestScheduledScan:
+    """Tests for the ScheduledScan model."""
+
+    def test_creation(self, session: Session) -> None:
+        sched = ScheduledScan(
+            domain="example.com",
+            scan_type="quick",
+            frequency="weekly",
+            created_by="admin@reconx.io",
+        )
+        session.add(sched)
+        session.commit()
+
+        assert sched.id is not None
+        assert sched.is_active is True
+        assert sched.frequency == "weekly"
+
+    def test_defaults(self, session: Session) -> None:
+        sched = ScheduledScan(
+            domain="test.org", frequency="daily"
+        )
+        session.add(sched)
+        session.commit()
+
+        assert sched.scan_type == "full"
+        assert sched.is_active is True
+        assert sched.next_run is None
+
+    def test_repr(self, session: Session) -> None:
+        sched = ScheduledScan(
+            domain="corp.example.com", frequency="monthly"
+        )
+        session.add(sched)
+        session.commit()
+        assert "corp.example.com" in repr(sched)
+
+
+class TestKnownVulnerability:
+    """Tests for the KnownVulnerability model."""
+
+    def test_creation(self, session: Session) -> None:
+        tech = Technology(
+            name="Apache", category="web_server", type="software"
+        )
+        session.add(tech)
+        session.commit()
+
+        kv = KnownVulnerability(
+            technology_id=tech.id,
+            cve_id="CVE-2021-41773",
+            vuln_name="Apache Path Traversal",
+            severity=95,
+            advisory_url="https://nvd.nist.gov/vuln/detail/CVE-2021-41773",
+            affected_versions="2.4.49",
+            fixed_version="2.4.51",
+        )
+        session.add(kv)
+        session.commit()
+
+        assert kv.id is not None
+        assert kv.severity == 95
+
+    def test_technology_relationship(self, session: Session) -> None:
+        tech = Technology(
+            name="OpenSSL", category="library", type="software"
+        )
+        session.add(tech)
+        session.commit()
+
+        kv1 = KnownVulnerability(
+            technology_id=tech.id,
+            cve_id="CVE-2014-0160",
+            vuln_name="Heartbleed",
+            severity=100,
+        )
+        kv2 = KnownVulnerability(
+            technology_id=tech.id,
+            cve_id="CVE-2022-0778",
+            vuln_name="Infinite Loop",
+            severity=75,
+        )
+        session.add_all([kv1, kv2])
+        session.commit()
+
+        assert len(tech.known_vulnerabilities) == 2
+        assert kv1.technology.name == "OpenSSL"
+
+    def test_repr(self, session: Session) -> None:
+        tech = Technology(
+            name="Nginx", category="web_server", type="software"
+        )
+        session.add(tech)
+        session.commit()
+        kv = KnownVulnerability(
+            technology_id=tech.id,
+            cve_id="CVE-2023-1234",
+            vuln_name="Test Vuln",
+        )
+        session.add(kv)
+        session.commit()
+        assert "CVE-2023-1234" in repr(kv)
+
+
+# ---------------------------------------------------------------------------
+# Cross-cutting tests
+# ---------------------------------------------------------------------------
+
+
+class TestTableCreation:
+    """Verify all 25 tables are created."""
+
+    def test_all_tables_exist(self, engine) -> None:
+        inspector = inspect(engine)
+        table_names = set(inspector.get_table_names())
+
+        expected = {
+            "scan_runs",
+            "subdomains",
+            "port_scans",
+            "vulnerabilities",
+            "http_headers",
+            "technologies",
+            "domain_technologies",
+            "vulnerability_metadata",
+            "dns_records",
+            "isp_locations",
+            "threat_intel_data",
+            "compliance_reports",
+            "compliance_findings",
+            "risk_scores",
+            "audit_logs",
+            "asset_snapshots",
+            "asset_changes",
+            "change_notifications",
+            "website_snapshots",
+            "scanner_integrations",
+            "scan_runner_metadata",
+            "api_keys",
+            "saved_reports",
+            "scheduled_scans",
+            "known_vulnerabilities",
+        }
+        assert expected.issubset(table_names), (
+            f"Missing tables: {expected - table_names}"
+        )
+
+    def test_table_count(self, engine) -> None:
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        assert len(tables) >= 25  # 25 base + supplementary models
+
+
+class TestCascadeDelete:
+    """Verify cascade deletes propagate correctly."""
+
+    def test_delete_scan_cascades_to_subdomains(
+        self, session: Session
+    ) -> None:
+        scan = _create_scan_run(session)
+        sub = Subdomain(scan_run_id=scan.id, subdomain="del.example.com")
+        session.add(sub)
+        session.commit()
+
+        session.delete(scan)
+        session.commit()
+
+        remaining = session.query(Subdomain).all()
+        assert len(remaining) == 0
+
+    def test_delete_scan_cascades_to_vulnerabilities(
+        self, session: Session
+    ) -> None:
+        scan = _create_scan_run(session)
+        vuln = Vulnerability(
+            scan_run_id=scan.id, vuln_type="test", title="Test Vuln"
+        )
+        session.add(vuln)
+        session.commit()
+
+        session.delete(scan)
+        session.commit()
+
+        remaining = session.query(Vulnerability).all()
+        assert len(remaining) == 0
+
+    def test_delete_subdomain_cascades_to_port_scans(
+        self, session: Session
+    ) -> None:
+        scan = _create_scan_run(session)
+        sub = _create_subdomain(session, scan)
+        port = PortScan(subdomain_id=sub.id, port=8080, state="open")
+        session.add(port)
+        session.commit()
+
+        session.delete(sub)
+        session.commit()
+
+        remaining = session.query(PortScan).all()
+        assert len(remaining) == 0
+
+
+class TestFullScanHierarchy:
+    """End-to-end test building a full scan data tree."""
+
+    def test_full_hierarchy(self, session: Session) -> None:
+        # Create scan
+        scan = ScanRun(domain="fulltest.com", scan_type="full")
+        session.add(scan)
+        session.commit()
+
+        # Subdomain
+        sub = Subdomain(
+            scan_run_id=scan.id,
+            subdomain="www.fulltest.com",
+            is_alive=True,
+        )
+        session.add(sub)
+        session.commit()
+
+        # Port
+        port = PortScan(
+            subdomain_id=sub.id, port=443, state="open", service="HTTPS"
+        )
+        session.add(port)
+        session.commit()
+
+        # Vulnerability linked to subdomain and port
+        vuln = Vulnerability(
+            scan_run_id=scan.id,
+            subdomain_id=sub.id,
+            port_scan_id=port.id,
+            vuln_type="weak_cipher",
+            title="TLS 1.0 Enabled",
+            severity=45,
+        )
+        session.add(vuln)
+        session.commit()
+
+        # Metadata for vulnerability
+        meta = VulnerabilityMetadata(
+            vulnerability_id=vuln.id,
+            cve_id="CVE-2011-3389",
+            cvss_v31_score=3.7,
+            source="testssl",
+        )
+        session.add(meta)
+        session.commit()
+
+        # HTTP header
+        header = HTTPHeader(
+            subdomain_id=sub.id,
+            header_name="Server",
+            header_value="Apache/2.4.41",
+        )
+        session.add(header)
+        session.commit()
+
+        # DNS record
+        dns = DNSRecord(
+            scan_run_id=scan.id,
+            domain="fulltest.com",
+            record_type="A",
+            value="10.0.0.1",
+        )
+        session.add(dns)
+        session.commit()
+
+        # Technology
+        tech = Technology(
+            name="Apache HTTP", category="web_server", type="software"
+        )
+        session.add(tech)
+        session.commit()
+
+        dt = DomainTechnology(
+            scan_run_id=scan.id, technology_id=tech.id, version="2.4.41"
+        )
+        session.add(dt)
+        session.commit()
+
+        # Verify hierarchy navigation
+        assert len(scan.subdomains) == 1
+        assert len(scan.vulnerabilities) == 1
+        assert len(scan.dns_records) == 1
+        assert len(scan.domain_technologies) == 1
+        assert scan.subdomains[0].port_scans[0].port == 443
+        assert scan.vulnerabilities[0].vuln_metadata[0].cve_id == "CVE-2011-3389"
+        assert scan.subdomains[0].http_headers[0].header_name == "Server"

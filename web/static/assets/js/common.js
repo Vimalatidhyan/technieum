@@ -69,26 +69,13 @@ function initSidebar() {
   }
 }
 
-// ── API auth ──────────────────────────────────────────────────────────────────
-async function ensureApiKey() {
-  const stored = localStorage.getItem('reconx_api_key');
-  if (stored && stored !== 'demo_key' && stored.length >= 32) return;
-  try {
-    const res = await fetch('/api/v1/bootstrap-key');
-    if (res.ok) {
-      const data = await res.json();
-      if (data.key) {
-        localStorage.setItem('reconx_api_key', data.key);
-        console.log('[ReconX] Bootstrap API key auto-configured');
-      }
-    }
-  } catch { /* ignore network errors during bootstrap */ }
+// ── API (no auth — API key disabled) ──────────────────────────────────────────
+function ensureApiKey() {
+  /* No-op: API key auth is disabled. Kept for compatibility. */
 }
 
 function hdrs(extra = {}) {
-  const key = localStorage.getItem('reconx_api_key') || '';
-  if (!key) console.warn('[ReconX] API key missing — call ensureApiKey() first');
-  return { 'X-API-Key': key, ...extra };
+  return { ...extra };
 }
 
 async function apiGet(path) {

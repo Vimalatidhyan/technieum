@@ -3,7 +3,7 @@
 Route order matters: static paths (/templates) must be registered
 BEFORE parameterized paths (/{report_id}) to avoid shadowing.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime, timezone
@@ -13,6 +13,12 @@ from app.db.models import ScanRun, ComplianceReport
 from app.api.models.common import StatusResponse
 
 router = APIRouter()
+
+
+class GenerateReportRequest(BaseModel):
+    """JSON body for POST /reports/."""
+    scan_run_id: int
+    report_type: str = "technical"
 
 # ── Response models ──────────────────────────────────────────────────────────
 
@@ -86,11 +92,12 @@ def list_reports(
 
 @router.post("/", response_model=StatusResponse, summary="Generate report")
 def generate_report(
-    scan_run_id: int,
-    report_type: str = "technical",
+    body: GenerateReportRequest = Body(..., embed=False),
     db: Session = Depends(get_db),
 ):
     """Generate a new compliance report for a completed scan."""
+    scan_run_id = body.scan_run_id
+    report_type = body.report_type
     if report_type not in VALID_TEMPLATES:
         raise HTTPException(
             status_code=422,

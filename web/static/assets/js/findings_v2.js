@@ -6,20 +6,8 @@
 
 const API = '/api/v1';
 
-// Auto-bootstrap: fetch and store API key if none configured
-async function ensureApiKey() {
-  const stored = localStorage.getItem('reconx_api_key');
-  if (stored && stored !== 'demo_key' && stored.length >= 32) return;
-  try {
-    const res = await fetch('/api/v1/bootstrap-key');
-    if (res.ok) {
-      const data = await res.json();
-      if (data.key) {
-        localStorage.setItem('reconx_api_key', data.key);
-        console.log('Bootstrap API key auto-configured');
-      }
-    }
-  } catch { /* ignore */ }
+function ensureApiKey() {
+  /* No-op: API key auth disabled. */
 }
 
 let state = {
@@ -278,9 +266,7 @@ function changePage(delta) {
 // ─── Utilities ────────────────────────────────────────────────────────────────
 function el(id) { return document.getElementById(id); }
 function hdrs() {
-  const key = localStorage.getItem('reconx_api_key') || '';
-  if (!key) console.warn('reconx_api_key not set; call ensureApiKey() first');
-  return { 'X-API-Key': key };
+  return {};
 }
 
 async function apiGet(path) {

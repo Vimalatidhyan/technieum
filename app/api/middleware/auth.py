@@ -87,86 +87,12 @@ def ensure_bootstrap_key() -> Optional[str]:
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
+    """API key auth is disabled — all requests are allowed. Kept for optional re-enable later."""
+
     async def dispatch(self, request: Request, call_next):
-        path = request.url.path
-        # Exempt: health/version/docs, UI pages, static assets, OPTIONS preflight
-        # Also exempt SSE stream endpoints (read-only, EventSource can't send headers)
-        if (path in EXEMPT_PATHS
-                or request.method == "OPTIONS"
-                or path.startswith(_UI_PREFIXES)
-                or path.startswith(_EXEMPT_API_PREFIXES)
-                or not path.startswith(_PROTECTED_PREFIX)):
-            return await call_next(request)
-
-        # Extract API key from headers or query param (needed for EventSource)
-        api_key = (
-            request.headers.get("X-API-Key")
-            or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-            or request.query_params.get("api_key", "")
-        )
-
-        if not api_key:
-            return JSONResponse({"detail": "Unauthorized - API key required"}, status_code=401)
-
-        # Validate format (alphanumeric, 32-64 chars)
-        if not api_key.isalnum() or not (32 <= len(api_key) <= 64):
-            return JSONResponse({"detail": "Invalid API key format"}, status_code=401)
-
-        key_hash = hash_api_key(api_key)
-
-        # Fast path: check in-process cache first
-        cached = _cache_lookup(key_hash)
-        if cached:
-            user, name, expires_at = cached
-            if expires_at and expires_at < datetime.now(timezone.utc):
-                del _key_cache[key_hash]
-                return JSONResponse({"detail": "API key expired"}, status_code=401)
-            request.state.user = user
-            request.state.api_key_name = name
-            return await call_next(request)
-
-        # Slow path: validate against database
-        try:
-            from app.db.database import SessionLocal
-            from app.db.models import APIKey
-
-            db = SessionLocal()
-            try:
-                api_key_obj = db.query(APIKey).filter(
-                    APIKey.key_hash == key_hash,
-                    APIKey.is_active == True,
-                ).first()
-
-                if not api_key_obj:
-                    return JSONResponse({"detail": "Invalid API key"}, status_code=401)
-
-                expires_raw = api_key_obj.expires_at
-                if expires_raw is not None:
-                    if expires_raw.tzinfo is None:
-                        expires_raw = expires_raw.replace(tzinfo=timezone.utc)
-                if expires_raw and expires_raw < datetime.now(timezone.utc):
-                    return JSONResponse({"detail": "API key expired"}, status_code=401)
-
-                # Update last_used without a separate query round-trip
-                api_key_obj.last_used = datetime.now(timezone.utc)
-                db.commit()
-
-                user = api_key_obj.user_identifier
-                name = api_key_obj.name
-                # Normalize to tz-aware for consistent cache comparisons
-                expires_at = expires_raw
-            finally:
-                db.close()
-
-            # Populate cache and request state
-            _cache_store(key_hash, user, name, expires_at)
-            request.state.user = user
-            request.state.api_key_name = name
-
-        except Exception as e:
-            logger.error(f"Auth middleware error: {e}")
-            return JSONResponse({"detail": "Authentication service unavailable"}, status_code=503)
-
+        # Auth disabled: always pass through (no API key required)
+        request.state.user = getattr(request.state, "user", "anonymous")
+        request.state.api_key_name = getattr(request.state, "api_key_name", None)
         return await call_next(request)
 
 

@@ -1,0 +1,2364 @@
+
+
+# >>> app/api/routes/metrics.py
+
+"""Observability metrics endpoint.
+
+Returns lightweight operational counters in JSON.  No external metrics
+library required — all data comes from the in-process state the app
+already tracks (DB row counts, cache size, rate-limit store).
+"""
+import time
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.db.database import get_db
+from app.db.models import ScanRun, Vulnerability, AssetSnapshot, APIKey
+from app.api.middleware.auth import _key_cache, AUTH_CACHE_TTL
+
+router = APIRouter()
+
+_START_TIME = time.monotonic()
+
+
+@router.get("/", summary="Operational metrics")
+def get_metrics(db: Session = Depends(get_db)):
+    """Return lightweight operational metrics as JSON."""
+    uptime_s = round(time.monotonic() - _START_TIME)
+
+    scan_counts: dict[str, int] = {}
+    for row in db.execute(text("SELECT status, COUNT(*) FROM scan_runs GROUP BY status")):
+        scan_counts[row[0]] = row[1]
+
+    return {
+        "uptime_seconds": uptime_s,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "db": {
+            "scans_total": db.query(ScanRun).count(),
+            "scans_by_status": scan_counts,
+            "vulnerabilities_total": db.query(Vulnerability).count(),
+            "asset_snapshots_total": db.query(AssetSnapshot).count(),
+            "api_keys_active": db.query(APIKey).filter(APIKey.is_active == True).count(),
+        },
+        "auth_cache": {
+            "entries": len(_key_cache),
+            "ttl_seconds": AUTH_CACHE_TTL,
+        },
+    }
+
+
+# >>> app/api/routes/findings.py
+
+"""Vulnerability findings API routes.
+
+Route order: static paths (/by-severity, /by-type, /domain/{target}/summary)
+must be registered BEFORE parameterised paths (/{finding_id}) to avoid
+FastAPI type-coercion shadowing.
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from sqlalchemy import func, case, distinct
+from typing import Optional
+
+from app.db.database import get_db
+from app.db.models import Vulnerability, ScanRun
+from app.api.models.finding import FindingListResponse, FindingResponse, FindingUpdateRequest
+from app.api.models.common import StatusResponse
+
+router = APIRouter()
+
+
+def _severity_counts(vulns):
+    """Aggregate vulnerability list into tier counts."""
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for v in vulns:
+        sev = v.severity or 0
+        if sev >= 90:
+            counts["critical"] += 1
+        elif sev >= 70:
+            counts["high"] += 1
+        elif sev >= 40:
+            counts["medium"] += 1
+        elif sev >= 10:
+            counts["low"] += 1
+        else:
+            counts["info"] += 1
+    return counts
+
+
+# ── Static / aggregate routes ────────────────────────────────────────────────
+
+@router.get("/", response_model=FindingListResponse, summary="List findings")
+def list_findings(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    scan_run_id: Optional[int] = None,
+    severity_min: Optional[int] = Query(None, ge=0, le=100),
+    vuln_type: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """List all vulnerability findings with optional filters."""
+    q = db.query(Vulnerability)
+    if scan_run_id:
+        q = q.filter(Vulnerability.scan_run_id == scan_run_id)
+    if severity_min is not None:
+        q = q.filter(Vulnerability.severity >= severity_min)
+    if vuln_type:
+        q = q.filter(Vulnerability.vuln_type == vuln_type)
+    total = q.count()
+    items = q.offset((page - 1) * per_page).limit(per_page).all()
+    return FindingListResponse(total=total, page=page, per_page=per_page, items=items)
+
+
+@router.get("/by-severity", summary="Findings grouped by severity")
+def findings_by_severity(scan_run_id: Optional[int] = None, db: Session = Depends(get_db)):
+    """Get finding counts grouped by severity tier using SQL aggregation."""
+    severity_case = case(
+        (Vulnerability.severity >= 90, "critical"),
+        (Vulnerability.severity >= 70, "high"),
+        (Vulnerability.severity >= 40, "medium"),
+        (Vulnerability.severity >= 10, "low"),
+        else_="info",
+    )
+    q = db.query(severity_case.label("tier"), func.count().label("count")).select_from(
+        Vulnerability
+    )
+    if scan_run_id:
+        q = q.filter(Vulnerability.scan_run_id == scan_run_id)
+    results = q.group_by("tier").all()
+    groups = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for tier, count in results:
+        groups[tier] = count
+    return groups
+
+
+@router.get("/by-type", summary="Findings grouped by type")
+def findings_by_type(scan_run_id: Optional[int] = None, db: Session = Depends(get_db)):
+    """Get finding counts grouped by vulnerability type."""
+    q = db.query(Vulnerability.vuln_type, func.count().label("count"))
+    if scan_run_id:
+        q = q.filter(Vulnerability.scan_run_id == scan_run_id)
+    results = q.group_by(Vulnerability.vuln_type).all()
+    return {vuln_type: count for vuln_type, count in results}
+
+
+@router.get("/domain/{target:path}/summary", summary="Findings summary for a target domain")
+def findings_domain_summary(target: str, db: Session = Depends(get_db)):
+    """Return severity-count summary for a specific target domain.
+
+    Uses the most recent scan for the given domain.
+    """
+    return _findings_summary_for_target(target, db)
+
+
+def _findings_summary_for_target(target: str, db: Session):
+    """Shared logic for findings summary by target domain."""
+    scan = (
+        db.query(ScanRun)
+        .filter(ScanRun.domain == target)
+        .order_by(ScanRun.id.desc())
+        .first()
+    )
+    if not scan:
+        return {"target": target, "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0, "total": 0}
+
+    vulns = db.query(Vulnerability).filter(Vulnerability.scan_run_id == scan.id).all()
+    counts = _severity_counts(vulns)
+    return {"target": target, **counts, "total": len(vulns)}
+
+
+def _findings_for_target(target: str, db: Session, page: int = 1, per_page: int = 100):
+    """Return findings list for a target domain."""
+    scan = (
+        db.query(ScanRun)
+        .filter(ScanRun.domain == target)
+        .order_by(ScanRun.id.desc())
+        .first()
+    )
+    if not scan:
+        return {"findings": [], "total": 0, "target": target}
+
+    q = db.query(Vulnerability).filter(Vulnerability.scan_run_id == scan.id)
+    total = q.count()
+    vulns = q.offset((page - 1) * per_page).limit(per_page).all()
+    findings = []
+    for v in vulns:
+        sev_val = v.severity or 0
+        if sev_val >= 90:
+            sev_label = "critical"
+        elif sev_val >= 70:
+            sev_label = "high"
+        elif sev_val >= 40:
+            sev_label = "medium"
+        elif sev_val >= 10:
+            sev_label = "low"
+        else:
+            sev_label = "info"
+        findings.append({
+            "id": v.id,
+            "name": v.title,
+            "title": v.title,
+            "severity": sev_label,
+            "severity_score": v.severity,
+            "host": getattr(v, 'subdomain', None) and v.subdomain.subdomain if v.subdomain else target,
+            "cve": v.cve_ids or "",
+            "tool": v.vuln_type,
+            "source": v.vuln_type,
+            "description": v.description or "",
+            "info": v.description or "",
+            "remediation": v.remediation or "",
+            "status": v.status or "open",
+            "discovered_at": v.discovered_at.isoformat() if v.discovered_at else None,
+        })
+    return {"findings": findings, "total": total, "target": target}
+
+
+# ── Legacy UI compat routes — must come before /{finding_id} ─────────────────
+# The dashboard-v2.js calls GET /api/v1/findings/{target}/summary
+# and findings_v2.js calls GET /api/v1/findings/{target}
+
+@router.get("/{target:path}/summary", summary="Findings summary (legacy UI compat)",
+            include_in_schema=False)
+def findings_summary_legacy(target: str, db: Session = Depends(get_db)):
+    """Legacy alias: /{target}/summary → domain summary."""
+    # Avoid matching integer IDs followed by /summary
+    if target.replace("/", "").isdigit():
+        raise HTTPException(status_code=404, detail="Not found")
+    # Strip /domain/ prefix if present
+    if target.startswith("domain/"):
+        target = target[7:]
+    return _findings_summary_for_target(target, db)
+
+
+# ── Item routes (parameterised — must come AFTER all static paths) ───────────
+
+@router.get("/{finding_id_or_target}", summary="Get finding or target findings")
+def get_finding_or_target(finding_id_or_target: str, db: Session = Depends(get_db)):
+    """Get a single finding by integer ID, or list findings for a target domain."""
+    # If it's a pure integer, look up the finding
+    if finding_id_or_target.isdigit():
+        finding = db.query(Vulnerability).filter(Vulnerability.id == int(finding_id_or_target)).first()
+        if not finding:
+            raise HTTPException(status_code=404, detail="Finding not found")
+        return finding
+    # Otherwise treat as target domain
+    return _findings_for_target(finding_id_or_target, db)
+
+
+@router.put("/{finding_id}", response_model=FindingResponse, summary="Update finding")
+def update_finding(
+    finding_id: int, req: FindingUpdateRequest, db: Session = Depends(get_db)
+):
+    finding = db.query(Vulnerability).filter(Vulnerability.id == finding_id).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    if req.severity is not None:
+        finding.severity = req.severity
+    if req.remediation:
+        finding.remediation = req.remediation
+    if req.status is not None:
+        finding.status = req.status
+    db.commit()
+    db.refresh(finding)
+    return finding
+
+
+@router.delete("/{finding_id}", response_model=StatusResponse, summary="Delete finding")
+def delete_finding(finding_id: int, db: Session = Depends(get_db)):
+    finding = db.query(Vulnerability).filter(Vulnerability.id == finding_id).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    db.delete(finding)
+    db.commit()
+    return StatusResponse(status="deleted", message=f"Finding {finding_id} deleted")
+
+
+@router.post("/{finding_id}/remediate", response_model=StatusResponse, summary="Mark in remediation")
+def remediate_finding(finding_id: int, db: Session = Depends(get_db)):
+    finding = db.query(Vulnerability).filter(Vulnerability.id == finding_id).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    finding.status = "in_remediation"
+    db.commit()
+    db.refresh(finding)
+    return StatusResponse(
+        status="in_remediation",
+        message=f"Finding {finding_id} marked for remediation",
+    )
+
+
+# >>> app/api/routes/intel.py
+
+"""Threat intelligence API routes."""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from typing import Optional, List
+from pydantic import BaseModel
+from app.db.database import get_db
+from app.db.models import ThreatIntelData, DataLeak, MalwareIndicator
+
+router = APIRouter()
+
+# Response models
+class ThreatIndicator(BaseModel):
+    id: int
+    type: str
+    value: str
+    source: str
+    severity: Optional[int] = None
+
+class ThreatFeedResponse(BaseModel):
+    total: int
+    page: int
+    per_page: int
+    items: List[ThreatIndicator]
+
+class DataLeakItem(BaseModel):
+    id: int
+    email: str
+    breach: str
+
+class DataLeaksResponse(BaseModel):
+    total: int
+    items: List[DataLeakItem]
+
+class MalwareIndicatorItem(BaseModel):
+    type: str
+    family: Optional[str] = None
+    verdict: Optional[str] = None
+
+class MalwareLookupResponse(BaseModel):
+    ioc: str
+    found: bool
+    indicators: List[MalwareIndicatorItem]
+
+class ReputationItem(BaseModel):
+    source: str
+    severity: Optional[int] = None
+
+class IPReputationResponse(BaseModel):
+    ip: str
+    reports: int
+    data: List[ReputationItem]
+
+class DomainReputationResponse(BaseModel):
+    domain: str
+    reports: int
+    data: List[ReputationItem]
+
+@router.get("/threat-feed", response_model=ThreatFeedResponse, summary="Latest threat data")
+def threat_feed(page: int = Query(1, ge=1), per_page: int = Query(20, ge=1, le=100), db: Session = Depends(get_db)):
+    """Get latest threat intelligence data."""
+    q = db.query(ThreatIntelData).order_by(ThreatIntelData.last_updated.desc())
+    total = q.count()
+    items = [
+        ThreatIndicator(
+            id=t.id,
+            type=t.indicator_type,
+            value=t.indicator_value,
+            source=t.source,
+            severity=t.severity
+        ) for t in q.offset((page-1)*per_page).limit(per_page).all()
+    ]
+    return ThreatFeedResponse(total=total, page=page, per_page=per_page, items=items)
+
+@router.get("/data-leaks", response_model=DataLeaksResponse, summary="Data leaks")
+def data_leaks(page: int = Query(1, ge=1), per_page: int = Query(20, ge=1, le=100), scan_run_id: Optional[int] = None, db: Session = Depends(get_db)):
+    """Query data leak findings with PII redaction."""
+    q = db.query(DataLeak)
+    if scan_run_id:
+        q = q.filter(DataLeak.scan_run_id == scan_run_id)
+    total = q.count()
+    items = q.offset((page-1)*per_page).limit(per_page).all()
+    
+    # Redact PII: show only first 3 chars + *** + domain
+    redacted_items = []
+    for d in items:
+        email_parts = d.email.split("@") if d.email and "@" in d.email else [d.email or ""]
+        if len(email_parts) == 2:
+            username = email_parts[0]
+            domain = email_parts[1]
+            redacted_email = f"{username[:3]}***@{domain}" if len(username) > 3 else f"***@{domain}"
+        else:
+            redacted_email = "***"
+        
+        redacted_items.append(DataLeakItem(
+            id=d.id,
+            email=redacted_email,
+            breach=d.breach_name
+        ))
+    
+    return DataLeaksResponse(total=total, items=redacted_items)
+
+@router.get("/malware/{ioc}", response_model=MalwareLookupResponse, summary="Malware indicator lookup")
+def malware_lookup(ioc: str, db: Session = Depends(get_db)):
+    """Look up a malware indicator (hash, domain, IP)."""
+    indicators = db.query(MalwareIndicator).filter(MalwareIndicator.indicator_value.contains(ioc)).limit(10).all()
+    if not indicators:
+        return MalwareLookupResponse(ioc=ioc, found=False, indicators=[])
+    
+    indicator_items = [
+        MalwareIndicatorItem(
+            type=i.indicator_type,
+            family=i.malware_family,
+            verdict=i.verdict
+        ) for i in indicators
+    ]
+    return MalwareLookupResponse(ioc=ioc, found=True, indicators=indicator_items)
+
+@router.get("/ip-reputation/{ip}", response_model=IPReputationResponse, summary="IP reputation")
+def ip_reputation(ip: str, db: Session = Depends(get_db)):
+    """Check IP reputation."""
+    results = db.query(ThreatIntelData).filter(ThreatIntelData.indicator_value == ip).all()
+    data = [ReputationItem(source=r.source, severity=r.severity) for r in results]
+    return IPReputationResponse(ip=ip, reports=len(results), data=data)
+
+@router.get("/domain-reputation/{domain}", response_model=DomainReputationResponse, summary="Domain reputation")
+def domain_reputation(domain: str, db: Session = Depends(get_db)):
+    """Check domain reputation."""
+    results = db.query(ThreatIntelData).filter(ThreatIntelData.indicator_value.contains(domain)).all()
+    data = [ReputationItem(source=r.source, severity=r.severity) for r in results]
+    return DomainReputationResponse(domain=domain, reports=len(results), data=data)
+
+
+# >>> app/api/routes/__init__.py
+
+
+
+# >>> app/api/routes/stream.py
+
+"""Server-Sent Events streaming routes.
+
+All events are read from the ``scan_events`` table written by the worker.
+No synthetic data, no hard-coded strings — if a row isn't in the DB it
+isn't sent.
+"""
+import asyncio
+import json
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Query
+from fastapi.responses import StreamingResponse
+
+from app.db.database import Database
+from app.db.models import ScanEvent, ScanProgress, ScanRun
+
+router = APIRouter()
+
+_POLL_INTERVAL = 2   # seconds between DB polls while waiting for new events
+_MAX_ITERATIONS = 600  # 20 minutes max stream duration (600 * 2s)
+
+
+async def _event_stream(scan_id: int, last_event_id: int = 0):
+    """Yield SSE lines backed entirely by ScanEvent rows in the database."""
+    db_conn = Database()
+    db_conn.connect()
+    idle = 0
+    try:
+        for _ in range(_MAX_ITERATIONS):
+            # Refresh session state so we see rows committed by the worker
+            db_conn.session.expire_all()
+
+            # Fetch new events since last delivered id
+            new_events = (
+                db_conn.session.query(ScanEvent)
+                .filter(
+                    ScanEvent.scan_run_id == scan_id,
+                    ScanEvent.id > last_event_id,
+                )
+                .order_by(ScanEvent.id)
+                .limit(50)
+                .all()
+            )
+
+            for ev in new_events:
+                payload = {
+                    "id": ev.id,
+                    "event": ev.event_type,
+                    "level": ev.level,
+                    "message": ev.message,
+                    "phase": ev.phase,
+                    "timestamp": ev.created_at.isoformat()
+                    if ev.created_at
+                    else datetime.now(timezone.utc).isoformat(),
+                }
+                if ev.data:
+                    try:
+                        payload["data"] = json.loads(ev.data)
+                    except (json.JSONDecodeError, TypeError):
+                        payload["data"] = ev.data
+                yield f"data: {json.dumps(payload)}\n\n"
+                last_event_id = ev.id
+                idle = 0
+
+            # Check terminal scan state
+            scan_run = (
+                db_conn.session.query(ScanRun)
+                .filter(ScanRun.id == scan_id)
+                .first()
+            )
+            if scan_run is None:
+                yield f"data: {json.dumps({'event': 'error', 'message': 'Scan not found'})}\n\n"
+                break
+            if scan_run.status in ("completed", "failed", "stopped"):
+                yield f"data: {json.dumps({'event': 'completed', 'status': scan_run.status, 'scan_id': scan_id})}\n\n"
+                break
+
+            # No new events — send heartbeat every ~30 s of idle
+            if not new_events:
+                idle += 1
+                if idle % 15 == 0:
+                    yield f"data: {json.dumps({'event': 'heartbeat', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
+
+            await asyncio.sleep(_POLL_INTERVAL)
+
+    except Exception as exc:
+        yield f"data: {json.dumps({'event': 'error', 'message': str(exc)})}\n\n"
+    finally:
+        db_conn.close()
+
+
+@router.get("/logs/{scan_id}", summary="Stream scan logs (SSE)")
+async def stream_logs(
+    scan_id: int,
+    last_event_id: int = Query(0, alias="lastEventId", ge=0),
+):
+    """Stream scan log events via SSE.
+
+    The client may pass ``?lastEventId=N`` to resume from a known position
+    without re-receiving already-seen events.
+    """
+    return StreamingResponse(
+        _event_stream(scan_id, last_event_id=last_event_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/scan/{scan_id}", summary="Stream scan updates (SSE)")
+async def stream_scan(
+    scan_id: int,
+    last_event_id: int = Query(0, alias="lastEventId", ge=0),
+):
+    """Stream all scan events (logs, progress, stats) via SSE."""
+    return StreamingResponse(
+        _event_stream(scan_id, last_event_id=last_event_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/progress/{scan_id}", summary="Stream progress (SSE)")
+async def stream_progress(
+    scan_id: int,
+    last_event_id: int = Query(0, alias="lastEventId", ge=0),
+):
+    """Stream progress-type events for a scan via SSE."""
+
+    async def _progress_only(scan_id: int, last_event_id: int):
+        db_conn = Database()
+        db_conn.connect()
+        try:
+            for _ in range(_MAX_ITERATIONS):
+                db_conn.session.expire_all()
+
+                new_events = (
+                    db_conn.session.query(ScanEvent)
+                    .filter(
+                        ScanEvent.scan_run_id == scan_id,
+                        ScanEvent.id > last_event_id,
+                        ScanEvent.event_type.in_(["progress", "completed", "error", "stats"]),
+                    )
+                    .order_by(ScanEvent.id)
+                    .limit(20)
+                    .all()
+                )
+
+                for ev in new_events:
+                    payload = {
+                        "id": ev.id,
+                        "event": ev.event_type,
+                        "message": ev.message,
+                        "phase": ev.phase,
+                        "timestamp": ev.created_at.isoformat() if ev.created_at else None,
+                    }
+                    if ev.data:
+                        try:
+                            payload["data"] = json.loads(ev.data)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    last_event_id = ev.id
+
+                # Also send a snapshot from ScanProgress every poll
+                prog = (
+                    db_conn.session.query(ScanProgress)
+                    .filter(ScanProgress.scan_run_id == scan_id)
+                    .first()
+                )
+                if prog:
+                    snap = {
+                        "event": "progress_snapshot",
+                        "phase": prog.current_phase,
+                        "percentage": prog.progress_percentage,
+                        "status": prog.status,
+                        "subdomains_found": prog.subdomains_found,
+                        "vulnerabilities_found": prog.vulnerabilities_found,
+                    }
+                    yield f"data: {json.dumps(snap)}\n\n"
+
+                scan_run = (
+                    db_conn.session.query(ScanRun)
+                    .filter(ScanRun.id == scan_id)
+                    .first()
+                )
+                if scan_run and scan_run.status in ("completed", "failed", "stopped"):
+                    yield f"data: {json.dumps({'event': 'completed', 'status': scan_run.status})}\n\n"
+                    break
+
+                await asyncio.sleep(_POLL_INTERVAL)
+
+        except Exception as exc:
+            yield f"data: {json.dumps({'event': 'error', 'message': str(exc)})}\n\n"
+        finally:
+            db_conn.close()
+
+    return StreamingResponse(
+        _progress_only(scan_id, last_event_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/alerts", summary="Stream security alerts (SSE)")
+async def stream_alerts():
+    """Stream error/critical events across all active scans."""
+
+    async def _alert_gen():
+        db_conn = Database()
+        db_conn.connect()
+        last_id = 0
+        try:
+            for _ in range(300):  # 10 minutes
+                db_conn.session.expire_all()
+                alerts = (
+                    db_conn.session.query(ScanEvent)
+                    .filter(
+                        ScanEvent.id > last_id,
+                        ScanEvent.level.in_(["error", "warning"]),
+                    )
+                    .order_by(ScanEvent.id)
+                    .limit(20)
+                    .all()
+                )
+                for ev in alerts:
+                    payload = {
+                        "event": "alert",
+                        "level": ev.level,
+                        "scan_run_id": ev.scan_run_id,
+                        "message": ev.message,
+                        "timestamp": ev.created_at.isoformat() if ev.created_at else None,
+                    }
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    last_id = ev.id
+                if not alerts:
+                    yield f"data: {json.dumps({'event': 'heartbeat', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
+                await asyncio.sleep(_POLL_INTERVAL)
+        except Exception as exc:
+            yield f"data: {json.dumps({'event': 'error', 'message': str(exc)})}\n\n"
+        finally:
+            db_conn.close()
+
+    return StreamingResponse(
+        _alert_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# >>> app/api/routes/assets.py
+
+"""Asset management API routes.
+
+Route order: static/specific paths before parameterised paths.
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from sqlalchemy import func, distinct
+from typing import Optional
+
+from app.db.database import get_db
+from app.db.models import Subdomain, ScanRun, Vulnerability, PortScan
+from app.api.models.asset import AssetListResponse, AssetResponse
+from app.api.models.common import StatusResponse
+
+router = APIRouter()
+
+
+# ── Static / aggregate routes (must precede /{asset_id}) ────────────────────
+
+@router.get("/targets", summary="List distinct target domains")
+def list_targets(db: Session = Depends(get_db)):
+    """Return all distinct target domains that have been scanned."""
+    rows = db.query(distinct(ScanRun.domain)).all()
+    targets = [r[0] for r in rows if r[0]]
+    return {"targets": targets, "total": len(targets)}
+
+
+@router.get("/stats/{target:path}", summary="Asset stats for a target domain")
+def asset_stats(target: str, db: Session = Depends(get_db)):
+    """Return aggregated asset and finding stats for a target domain."""
+    scan = (
+        db.query(ScanRun)
+        .filter(ScanRun.domain == target)
+        .order_by(ScanRun.id.desc())
+        .first()
+    )
+    if not scan:
+        return {"target": target, "assets": 0, "vulnerabilities": 0,
+                "critical": 0, "high": 0, "medium": 0, "low": 0}
+
+    assets = db.query(func.count(Subdomain.id)).filter(
+        Subdomain.scan_run_id == scan.id
+    ).scalar() or 0
+
+    vulns = db.query(Vulnerability).filter(Vulnerability.scan_run_id == scan.id).all()
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for v in vulns:
+        sev = v.severity or 0
+        if sev >= 90:
+            counts["critical"] += 1
+        elif sev >= 70:
+            counts["high"] += 1
+        elif sev >= 40:
+            counts["medium"] += 1
+        else:
+            counts["low"] += 1
+
+    return {"target": target, "assets": assets, "vulnerabilities": len(vulns), **counts}
+
+
+@router.get("/search", response_model=AssetListResponse, summary="Search assets")
+def search_assets(
+    q_str: str = Query(..., alias="q"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Subdomain).filter(Subdomain.subdomain.contains(q_str))
+    total = q.count()
+    items = q.offset((page - 1) * per_page).limit(per_page).all()
+    return AssetListResponse(total=total, page=page, per_page=per_page, items=items)
+
+
+@router.get("/by-domain/{domain}", response_model=AssetListResponse, summary="Assets by domain")
+def assets_by_domain(
+    domain: str,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    q = db.query(Subdomain).filter(Subdomain.subdomain.contains(domain))
+    total = q.count()
+    items = q.offset((page - 1) * per_page).limit(per_page).all()
+    return AssetListResponse(total=total, page=page, per_page=per_page, items=items)
+
+
+@router.get("/subdomains/{target:path}", summary="Subdomains for a target domain")
+def get_subdomains(target: str, db: Session = Depends(get_db)):
+    """Return all subdomains discovered for the given target domain (most recent scan)."""
+    scan = (
+        db.query(ScanRun)
+        .filter(ScanRun.domain == target)
+        .order_by(ScanRun.id.desc())
+        .first()
+    )
+    if not scan:
+        return {"subdomains": [], "total": 0}
+    items = db.query(Subdomain).filter(Subdomain.scan_run_id == scan.id).all()
+    return {
+        "subdomains": [
+            {
+                "subdomain": s.subdomain,
+                "ip": None,
+                "is_alive": s.is_alive,
+                "first_seen": s.first_seen.isoformat() if s.first_seen else None,
+                "last_seen": s.last_seen.isoformat() if s.last_seen else None,
+            }
+            for s in items
+        ],
+        "total": len(items),
+    }
+
+
+@router.get("/ports/{target:path}", summary="Open ports for a target domain")
+def get_ports(target: str, db: Session = Depends(get_db)):
+    """Return all port scan results for the given target domain (most recent scan)."""
+    scan = (
+        db.query(ScanRun)
+        .filter(ScanRun.domain == target)
+        .order_by(ScanRun.id.desc())
+        .first()
+    )
+    if not scan:
+        return {"ports": [], "total": 0}
+    rows = (
+        db.query(PortScan, Subdomain.subdomain)
+        .join(Subdomain, PortScan.subdomain_id == Subdomain.id)
+        .filter(Subdomain.scan_run_id == scan.id)
+        .all()
+    )
+    return {
+        "ports": [
+            {
+                "port": p.port,
+                "protocol": p.protocol,
+                "service": p.service,
+                "subdomain": subdomain,
+                "state": p.state,
+            }
+            for p, subdomain in rows
+        ],
+        "total": len(rows),
+    }
+
+
+@router.get("/high-risk", response_model=AssetListResponse, summary="High-risk assets")
+def high_risk_assets(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    min_vulns: int = Query(5, ge=0),
+    scan_run_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    vuln_counts = (
+        db.query(
+            Vulnerability.subdomain_id,
+            func.count(Vulnerability.id).label("vuln_count"),
+        )
+        .group_by(Vulnerability.subdomain_id)
+        .subquery()
+    )
+    q = (
+        db.query(Subdomain)
+        .join(vuln_counts, Subdomain.id == vuln_counts.c.subdomain_id)
+        .filter(vuln_counts.c.vuln_count >= min_vulns, Subdomain.is_alive == True)
+    )
+    if scan_run_id:
+        q = q.filter(Subdomain.scan_run_id == scan_run_id)
+    total = q.count()
+    items = (
+        q.order_by(vuln_counts.c.vuln_count.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+    return AssetListResponse(total=total, page=page, per_page=per_page, items=items)
+
+
+@router.get("/", response_model=AssetListResponse, summary="List assets")
+def list_assets(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    scan_run_id: Optional[int] = None,
+    is_alive: Optional[bool] = None,
+    db: Session = Depends(get_db),
+):
+    q = db.query(Subdomain)
+    if scan_run_id:
+        q = q.filter(Subdomain.scan_run_id == scan_run_id)
+    if is_alive is not None:
+        q = q.filter(Subdomain.is_alive == is_alive)
+    total = q.count()
+    items = q.offset((page - 1) * per_page).limit(per_page).all()
+    return AssetListResponse(total=total, page=page, per_page=per_page, items=items)
+
+
+# ── Item routes (parameterised — must come AFTER static paths) ───────────────
+
+@router.get("/{asset_id}", response_model=AssetResponse, summary="Get asset")
+def get_asset(asset_id: int, db: Session = Depends(get_db)):
+    asset = db.query(Subdomain).filter(Subdomain.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return asset
+
+
+@router.get("/{asset_id}/timeline", summary="Asset activity timeline")
+def asset_timeline(asset_id: int, db: Session = Depends(get_db)):
+    asset = db.query(Subdomain).filter(Subdomain.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    vulns = (
+        db.query(Vulnerability)
+        .filter(Vulnerability.subdomain_id == asset_id)
+        .order_by(Vulnerability.discovered_at.asc())
+        .all()
+    )
+    events = [
+        {
+            "event_type": "vulnerability",
+            "severity": v.severity,
+            "title": v.title,
+            "timestamp": v.discovered_at.isoformat() if v.discovered_at else None,
+        }
+        for v in vulns
+    ]
+    return {
+        "asset_id": asset_id,
+        "subdomain": asset.subdomain,
+        "is_alive": asset.is_alive,
+        "events": events,
+        "total": len(events),
+    }
+
+
+# >>> app/api/routes/scans.py
+
+"""Scan management API routes.
+
+Supports two request styles for scan creation:
+  - JSON body: {"domain": "example.com", "scan_type": "full"}  (canonical)
+  - Query params: ?target=example.com&phases=1,2,3,4           (legacy UI compat)
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from typing import Optional
+from datetime import datetime, timezone
+
+from app.db.database import get_db
+from app.db.models import ScanRun, ScanProgress, ScanJob
+from app.api.models.scan import ScanCreateRequest, ScanUpdateRequest, ScanResponse, ScanListResponse
+from app.api.models.common import StatusResponse
+
+router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _phases_to_scan_type(phases_str: Optional[str]) -> str:
+    """Map legacy ?phases=1,2,3,4 query parameter to a scan_type string."""
+    if not phases_str:
+        return "full"
+    try:
+        phases = [int(p.strip()) for p in phases_str.split(",") if p.strip()]
+    except ValueError:
+        return "full"
+    if phases == [0]:
+        return "quick"
+    if sorted(phases) == list(range(0, 5)):
+        return "deep"
+    return "full"
+
+
+def _enqueue(scan: ScanRun, db: Session) -> None:
+    """Create ScanProgress + ScanJob in the same transaction as the caller."""
+    progress = ScanProgress(scan_run_id=scan.id, status="queued")
+    db.add(progress)
+    job = ScanJob(
+        scan_run_id=scan.id,
+        status="queued",
+        queued_at=datetime.now(timezone.utc),
+    )
+    db.add(job)
+
+
+def _scan_to_dict(scan: ScanRun) -> dict:
+    """Return scan data including legacy field aliases expected by the UI."""
+    return {
+        "id": scan.id,
+        "scan_id": str(scan.id),          # legacy alias used by dashboard-v2.js
+        "domain": scan.domain,
+        "target": scan.domain,            # legacy alias used by dashboard-v2.js
+        "scan_type": scan.scan_type,
+        "status": scan.status,
+        "risk_score": scan.risk_score,
+        "phase": scan.phase,
+        "started_at": scan.created_at.isoformat() if scan.created_at else None,
+        "created_at": scan.created_at.isoformat() if scan.created_at else None,
+        "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
+        "phases": {},   # populated below for quick compat
+    }
+
+
+# ---------------------------------------------------------------------------
+# Collection routes
+# ---------------------------------------------------------------------------
+
+@router.get("/", summary="List all scans")
+def list_scans(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    status: Optional[str] = None,
+    domain: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """List all scan runs. Returns both ORM schema and legacy-alias fields."""
+    q = db.query(ScanRun)
+    if status:
+        q = q.filter(ScanRun.status == status)
+    if domain:
+        q = q.filter(ScanRun.domain.contains(domain))
+    total = q.count()
+    items_orm = q.offset((page - 1) * per_page).limit(per_page).all()
+    items = [_scan_to_dict(s) for s in items_orm]
+    return {
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "items": items,
+        "scans": items,   # legacy alias used by dashboard-v2.js
+    }
+
+
+@router.post("/", status_code=201, summary="Create scan")
+def create_scan(
+    # JSON body (canonical)
+    req: Optional[ScanCreateRequest] = None,
+    # Query params (legacy UI compat)
+    target: Optional[str] = Query(None, description="Target domain (legacy UI)"),
+    phases: Optional[str] = Query(None, description="Comma-separated phases (legacy UI)"),
+    test_mode: Optional[bool] = Query(False, description="Test mode flag (legacy UI)"),
+    db: Session = Depends(get_db),
+):
+    """Create a new scan.
+
+    Accepts either:
+    - POST /scans/ with JSON body {"domain": "...", "scan_type": "..."}
+    - POST /scans/?target=example.com&phases=1,2,3  (legacy dashboard format)
+    """
+    if req is not None:
+        domain = req.domain
+        scan_type = req.scan_type
+    elif target:
+        # Legacy query-param format
+        from pydantic import ValidationError
+        try:
+            validated = ScanCreateRequest(domain=target, scan_type=_phases_to_scan_type(phases))
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        domain = validated.domain
+        scan_type = validated.scan_type
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail="Either JSON body with 'domain' or query param 'target' is required",
+        )
+
+    scan = ScanRun(domain=domain, scan_type=scan_type, status="queued")
+    db.add(scan)
+    db.flush()
+    _enqueue(scan, db)
+    db.commit()
+    db.refresh(scan)
+    return _scan_to_dict(scan)
+
+
+# ---------------------------------------------------------------------------
+# Item routes
+# ---------------------------------------------------------------------------
+
+@router.get("/{scan_id}", summary="Get scan")
+def get_scan(scan_id: int, db: Session = Depends(get_db)):
+    scan = db.query(ScanRun).filter(ScanRun.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return _scan_to_dict(scan)
+
+
+@router.put("/{scan_id}", summary="Update scan")
+def update_scan(scan_id: int, req: ScanUpdateRequest, db: Session = Depends(get_db)):
+    scan = db.query(ScanRun).filter(ScanRun.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if req.status:
+        scan.status = req.status
+    if req.scan_type:
+        scan.scan_type = req.scan_type
+    db.commit()
+    db.refresh(scan)
+    return _scan_to_dict(scan)
+
+
+@router.delete("/{scan_id}", response_model=StatusResponse, summary="Delete scan")
+def delete_scan(scan_id: int, db: Session = Depends(get_db)):
+    scan = db.query(ScanRun).filter(ScanRun.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    db.delete(scan)
+    db.commit()
+    return StatusResponse(status="deleted", message=f"Scan {scan_id} deleted")
+
+
+@router.post("/{scan_id}/start", response_model=StatusResponse, summary="Start scan")
+def start_scan(scan_id: int, db: Session = Depends(get_db)):
+    """Enqueue a scan job. Idempotent — won't create duplicate active jobs."""
+    scan = db.query(ScanRun).filter(ScanRun.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if scan.status == "running":
+        raise HTTPException(status_code=400, detail="Scan already running")
+
+    active_job = (
+        db.query(ScanJob)
+        .filter(
+            ScanJob.scan_run_id == scan_id,
+            ScanJob.status.in_(["queued", "running"]),
+        )
+        .first()
+    )
+    if not active_job:
+        db.add(ScanJob(
+            scan_run_id=scan_id,
+            status="queued",
+            queued_at=datetime.now(timezone.utc),
+        ))
+
+    scan.status = "queued"
+    db.commit()
+    return StatusResponse(status="queued", message=f"Scan {scan_id} queued for execution")
+
+
+@router.post("/{scan_id}/stop", response_model=StatusResponse, summary="Stop scan")
+def stop_scan(scan_id: int, db: Session = Depends(get_db)):
+    """Stop a running scan.
+
+    Sets the scan status to 'stopped' and marks any active ScanJob as 'stopped'
+    so the worker will not continue processing it. Running worker processes will
+    detect the status change on their next poll and terminate the subprocess.
+    """
+    scan = db.query(ScanRun).filter(ScanRun.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    scan.status = "stopped"
+
+    # Mark active jobs as stopped so worker knows to abort
+    active_jobs = (
+        db.query(ScanJob)
+        .filter(
+            ScanJob.scan_run_id == scan_id,
+            ScanJob.status.in_(["queued", "running"]),
+        )
+        .all()
+    )
+    for job in active_jobs:
+        job.status = "stopped"
+
+    # Update progress record if present
+    progress = db.query(ScanProgress).filter(ScanProgress.scan_run_id == scan_id).first()
+    if progress:
+        progress.status = "stopped"
+
+    db.commit()
+    return StatusResponse(status="stopped", message=f"Scan {scan_id} stopped")
+
+
+@router.get("/{scan_id}/progress", summary="Get scan progress")
+def get_progress(scan_id: int, db: Session = Depends(get_db)):
+    progress = db.query(ScanProgress).filter(ScanProgress.scan_run_id == scan_id).first()
+    if not progress:
+        raise HTTPException(status_code=404, detail="Progress not found")
+    return {
+        "scan_id": scan_id,
+        "phase": progress.current_phase,
+        "tool": progress.current_tool,
+        "percentage": progress.progress_percentage,
+        "status": progress.status,
+        "subdomains_found": progress.subdomains_found,
+        "vulnerabilities_found": progress.vulnerabilities_found,
+    }
+
+
+@router.get("/{scan_id}/status", summary="Get scan status (alias for progress)")
+def get_scan_status(scan_id: int, db: Session = Depends(get_db)):
+    """Alias of /progress — UI sometimes calls /status instead."""
+    return get_progress(scan_id, db)
+
+
+@router.get("/{scan_id}/job", summary="Get queue job status")
+def get_job(scan_id: int, db: Session = Depends(get_db)):
+    job = (
+        db.query(ScanJob)
+        .filter(ScanJob.scan_run_id == scan_id)
+        .order_by(ScanJob.id.desc())
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="No job found for this scan")
+    return {
+        "job_id": job.id,
+        "scan_run_id": job.scan_run_id,
+        "status": job.status,
+        "worker_id": job.worker_id,
+        "queued_at": job.queued_at.isoformat() if job.queued_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "error": job.error,
+    }
+
+
+# >>> app/api/routes/reports.py
+
+"""Report generation API routes.
+
+Route order matters: static paths (/templates) must be registered
+BEFORE parameterized paths (/{report_id}) to avoid shadowing.
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from typing import Optional, List
+from datetime import datetime, timezone
+from pydantic import BaseModel, ConfigDict
+from app.db.database import get_db
+from app.db.models import ScanRun, ComplianceReport
+from app.api.models.common import StatusResponse
+
+router = APIRouter()
+
+# ── Response models ──────────────────────────────────────────────────────────
+
+VALID_TEMPLATES = [
+    "executive",
+    "technical",
+    "compliance",
+    "risk_summary",
+    "change_summary",
+    "trend",
+    "custom",
+]
+
+
+class ReportSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    report_type: Optional[str] = None
+    scan_run_id: Optional[int] = None
+    generated_at: Optional[datetime] = None
+
+
+class ReportListResponse(BaseModel):
+    total: int
+    page: int
+    per_page: int
+    items: List[ReportSummary]
+
+
+class ReportDetail(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    report_type: Optional[str] = None
+    scan_run_id: Optional[int] = None
+    generated_at: Optional[datetime] = None
+    content: Optional[str] = None
+
+
+# ── Static routes first (must precede /{report_id}) ─────────────────────────
+
+@router.get("/templates", summary="List report templates")
+def list_templates():
+    """List available report template names."""
+    return {"templates": VALID_TEMPLATES}
+
+
+# ── Collection routes ────────────────────────────────────────────────────────
+
+@router.get("/", response_model=ReportListResponse, summary="List reports")
+def list_reports(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    scan_run_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """List available compliance reports with pagination."""
+    q = db.query(ComplianceReport)
+    if scan_run_id:
+        q = q.filter(ComplianceReport.scan_run_id == scan_run_id)
+    total = q.count()
+    items = (
+        q.order_by(ComplianceReport.generated_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+    return ReportListResponse(total=total, page=page, per_page=per_page, items=items)
+
+
+@router.post("/", response_model=StatusResponse, summary="Generate report")
+def generate_report(
+    scan_run_id: int,
+    report_type: str = "technical",
+    db: Session = Depends(get_db),
+):
+    """Generate a new compliance report for a completed scan."""
+    if report_type not in VALID_TEMPLATES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid report_type. Must be one of: {VALID_TEMPLATES}",
+        )
+    scan = db.query(ScanRun).filter(ScanRun.id == scan_run_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    report = ComplianceReport(
+        scan_run_id=scan_run_id,
+        report_type=report_type,
+        generated_at=datetime.now(timezone.utc),
+    )
+    db.add(report)
+    db.commit()
+    return StatusResponse(
+        status="generated",
+        message=f"Report of type '{report_type}' created for scan {scan_run_id}",
+    )
+
+
+# ── Item routes (parameterised — must come AFTER all static paths) ───────────
+
+@router.get("/{report_id}", response_model=ReportDetail, summary="Get report")
+def get_report(report_id: int, db: Session = Depends(get_db)):
+    """Get a specific report by integer ID."""
+    report = db.query(ComplianceReport).filter(ComplianceReport.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return report
+
+
+# >>> app/api/routes/webhooks.py
+
+"""Webhook management routes.
+
+Delivery uses ``httpx`` for real HTTP POST with:
+  - JSON payload + ``X-ReconX-Event`` header
+  - Optional HMAC-SHA256 signature in ``X-ReconX-Signature``
+  - 10-second connect/read timeout
+  - success_count / failure_count / last_triggered persisted on every attempt
+"""
+import hashlib
+import hmac
+import json
+import logging
+from datetime import datetime, timezone
+from typing import Optional, List
+
+import httpx
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, ConfigDict, HttpUrl
+from sqlalchemy.orm import Session
+
+from app.api.models.common import StatusResponse
+from app.db.database import get_db
+from app.db.models import Webhook
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+_DELIVERY_TIMEOUT = httpx.Timeout(10.0)
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schemas
+# ---------------------------------------------------------------------------
+
+class WebhookCreateRequest(BaseModel):
+    url: HttpUrl
+    events: List[str] = ["scan.completed", "finding.critical"]
+    secret: Optional[str] = None
+
+
+class WebhookUpdateRequest(BaseModel):
+    url: Optional[HttpUrl] = None
+    events: Optional[List[str]] = None
+    active: Optional[bool] = None
+
+
+class WebhookResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    url: str
+    events: List[str]
+    active: bool
+    success_count: int
+    failure_count: int
+
+
+# ---------------------------------------------------------------------------
+# Delivery helper
+# ---------------------------------------------------------------------------
+
+def _build_signature(secret: str, body: bytes) -> str:
+    """Return ``sha256=<hex>`` HMAC-SHA256 of *body* using *secret*."""
+    sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return f"sha256={sig}"
+
+
+def _deliver(webhook: Webhook, event_type: str, payload: dict) -> tuple[bool, str]:
+    """POST *payload* to webhook URL.  Returns (success, error_message)."""
+    body = json.dumps(payload, default=str).encode()
+    headers = {
+        "Content-Type": "application/json",
+        "X-ReconX-Event": event_type,
+        "User-Agent": "ReconX-Webhook/2.0",
+    }
+    if webhook.secret:
+        headers["X-ReconX-Signature"] = _build_signature(webhook.secret, body)
+
+    try:
+        resp = httpx.post(
+            str(webhook.url),
+            content=body,
+            headers=headers,
+            timeout=_DELIVERY_TIMEOUT,
+        )
+        if resp.is_success:
+            return True, ""
+        return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
+    except httpx.TimeoutException:
+        return False, "delivery timed out after 10s"
+    except httpx.RequestError as exc:
+        return False, f"request error: {exc}"
+
+
+def _persist_delivery(db: Session, webhook: Webhook, success: bool) -> None:
+    """Update delivery counters and last_triggered timestamp."""
+    if success:
+        webhook.success_count += 1
+    else:
+        webhook.failure_count += 1
+    webhook.last_triggered = datetime.now(timezone.utc)
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@router.get("/", summary="List webhooks")
+def list_webhooks(db: Session = Depends(get_db)):
+    """List all registered webhooks."""
+    webhooks = db.query(Webhook).all()
+    return {
+        "total": len(webhooks),
+        "items": [
+            {
+                "id": wh.id,
+                "url": wh.url,
+                "events": wh.events.split(","),
+                "active": wh.active,
+                "success_count": wh.success_count,
+                "failure_count": wh.failure_count,
+                "last_triggered": wh.last_triggered.isoformat()
+                if wh.last_triggered
+                else None,
+            }
+            for wh in webhooks
+        ],
+    }
+
+
+@router.post("/", summary="Create webhook")
+def create_webhook(req: WebhookCreateRequest, db: Session = Depends(get_db)):
+    """Register a new webhook."""
+    webhook = Webhook(
+        url=str(req.url),
+        events=",".join(req.events),
+        secret=req.secret,
+        active=True,
+    )
+    db.add(webhook)
+    db.commit()
+    db.refresh(webhook)
+    return {
+        "id": webhook.id,
+        "url": webhook.url,
+        "events": webhook.events.split(","),
+        "active": webhook.active,
+        "created_at": webhook.created_at.isoformat() if webhook.created_at else None,
+    }
+
+
+@router.put("/{webhook_id}", summary="Update webhook")
+def update_webhook(
+    webhook_id: int, req: WebhookUpdateRequest, db: Session = Depends(get_db)
+):
+    """Update an existing webhook."""
+    webhook = db.query(Webhook).filter(Webhook.id == webhook_id).first()
+    if not webhook:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+
+    if req.url is not None:
+        webhook.url = str(req.url)
+    if req.events is not None:
+        webhook.events = ",".join(req.events)
+    if req.active is not None:
+        webhook.active = req.active
+
+    db.commit()
+    db.refresh(webhook)
+    return {
+        "id": webhook.id,
+        "url": webhook.url,
+        "events": webhook.events.split(","),
+        "active": webhook.active,
+    }
+
+
+@router.delete("/{webhook_id}", response_model=StatusResponse, summary="Delete webhook")
+def delete_webhook(webhook_id: int, db: Session = Depends(get_db)):
+    """Delete a webhook."""
+    webhook = db.query(Webhook).filter(Webhook.id == webhook_id).first()
+    if not webhook:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    db.delete(webhook)
+    db.commit()
+    return StatusResponse(status="deleted", message=f"Webhook {webhook_id} deleted")
+
+
+@router.post("/{webhook_id}/test", summary="Test webhook delivery")
+def test_webhook(webhook_id: int, db: Session = Depends(get_db)):
+    """Send a real test event to the webhook URL.
+
+    The request is a genuine HTTP POST.  Delivery result (success or failure)
+    is persisted to ``success_count`` / ``failure_count``.
+    """
+    webhook = db.query(Webhook).filter(Webhook.id == webhook_id).first()
+    if not webhook:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    if not webhook.active:
+        raise HTTPException(status_code=400, detail="Webhook is inactive")
+
+    payload = {
+        "event": "webhook.test",
+        "webhook_id": webhook.id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "message": "ReconX test delivery",
+    }
+
+    success, error = _deliver(webhook, "webhook.test", payload)
+    _persist_delivery(db, webhook, success)
+
+    if success:
+        logger.info("webhook test delivered",
+                    extra={"webhook_id": webhook.id, "url": webhook.url})
+        return StatusResponse(
+            status="delivered",
+            message=f"Test event delivered to webhook {webhook_id}",
+        )
+    else:
+        logger.warning("webhook test failed",
+                       extra={"webhook_id": webhook.id, "error": error})
+        # Return 200 with failure detail (delivery errors are not server errors)
+        return StatusResponse(
+            status="failed",
+            message=f"Delivery failed: {error}",
+        )
+
+
+@router.get("/{webhook_id}/events", summary="Get webhook delivery summary")
+def get_webhook_events(webhook_id: int, db: Session = Depends(get_db)):
+    """Get delivery statistics for a webhook."""
+    webhook = db.query(Webhook).filter(Webhook.id == webhook_id).first()
+    if not webhook:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    return {
+        "webhook_id": webhook.id,
+        "url": webhook.url,
+        "active": webhook.active,
+        "success_count": webhook.success_count,
+        "failure_count": webhook.failure_count,
+        "last_triggered": webhook.last_triggered.isoformat()
+        if webhook.last_triggered
+        else None,
+        "total_attempts": webhook.success_count + webhook.failure_count,
+        "success_rate": (
+            round(webhook.success_count / (webhook.success_count + webhook.failure_count) * 100, 1)
+            if (webhook.success_count + webhook.failure_count) > 0
+            else None
+        ),
+    }
+
+
+# >>> app/workers/worker.py
+
+"""Scan worker — isolated process that pulls work from the job queue.
+
+Architecture
+------------
+The API server writes a ScanJob row (status='queued') and this worker polls
+for it.  Claim is atomic:
+
+  PostgreSQL  — SELECT … FOR UPDATE SKIP LOCKED (no phantom double-claim)
+  SQLite      — single UPDATE WHERE id=(SELECT … LIMIT 1) is serialised by
+                WAL-mode exclusive write lock
+
+The worker writes ScanEvent rows as the harness produces output so the
+SSE stream endpoint delivers real telemetry, not synthetic strings.
+
+Usage
+-----
+    python -m app.workers.worker           # Persistent polling (auto-restart)
+    python -m app.workers.worker --drain   # Process once and exit
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import re
+import socket
+import subprocess
+import sys
+import time
+import uuid
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker, Session
+
+from app.api.middleware.logging import configure_json_logging
+
+_LOG_LEVEL = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
+configure_json_logging(level=_LOG_LEVEL)
+logger = logging.getLogger(__name__)
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./reconx.db")
+WORKER_POLL_SEC = int(os.environ.get("WORKER_POLL_SEC", "5"))
+WORKER_MAX_JOBS = int(os.environ.get("WORKER_MAX_JOBS", "4"))  # max concurrent jobs per worker process
+
+# Unique identifier for this worker process instance
+_WORKER_ID = f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+_engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+)
+_Session = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+
+# Resolve harness path relative to this file: app/workers/ → lib/run_scan.sh
+_HARNESS = Path(__file__).resolve().parents[2] / "lib" / "run_scan.sh"
+
+# Output base must match harness: ${RECONX_OUTPUT_DIR:-./output}
+_OUTPUT_BASE = Path(os.environ.get("RECONX_OUTPUT_DIR", "./output"))
+
+# Nuclei/finding severity string → integer score (matches findings.py convention)
+_SEV_MAP = {"critical": 90, "high": 70, "medium": 40, "low": 10, "info": 1}
+
+# Regex for nmap normal-format port lines: "22/tcp   open  ssh      OpenSSH 8.2"
+_NMAP_PORT_RE = re.compile(
+    r"^(\d+)/(tcp|udp)\s+(open|filtered|closed|open\|filtered)\s+(\S+)(?:\s+(.+))?$"
+)
+_NMAP_HOST_RE = re.compile(r"^Nmap scan report for (.+?)(?:\s+\([\d.]+\))?$")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _emit_event(
+    db: Session,
+    scan_run_id: int,
+    event_type: str,
+    level: str,
+    message: str,
+    data: Optional[dict] = None,
+    phase: Optional[int] = None,
+) -> None:
+    """Persist a ScanEvent row.  Each call commits immediately so the SSE
+    stream picks it up without waiting for the scan to finish."""
+    from app.db.models import ScanEvent
+    ev = ScanEvent(
+        scan_run_id=scan_run_id,
+        event_type=event_type,
+        level=level,
+        message=message,
+        data=json.dumps(data) if data else None,
+        phase=phase,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(ev)
+    db.commit()
+
+
+def _update_progress(db: Session, scan_run_id: int, **kwargs) -> None:
+    """Update ScanProgress fields and commit."""
+    from app.db.models import ScanProgress
+    prog = db.query(ScanProgress).filter(
+        ScanProgress.scan_run_id == scan_run_id
+    ).first()
+    if prog:
+        for k, v in kwargs.items():
+            setattr(prog, k, v)
+        prog.last_update = datetime.now(timezone.utc)
+        db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Atomic job claim — dialect-aware
+# ---------------------------------------------------------------------------
+
+def _claim_job(db: Session) -> Optional[object]:
+    """Atomically claim one queued ScanJob.  Returns the ORM object or None.
+
+    PostgreSQL: SELECT … FOR UPDATE SKIP LOCKED — zero chance of double-claim
+                even with many concurrent workers.
+    SQLite:     Single UPDATE inside an implicit transaction; WAL mode allows
+                only one writer at a time so the claim is effectively atomic.
+    """
+    from app.db.models import ScanJob
+
+    dialect = db.get_bind().dialect.name
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if dialect == "postgresql":
+        job = (
+            db.query(ScanJob)
+            .filter(ScanJob.status == "queued")
+            .order_by(ScanJob.id)
+            .with_for_update(skip_locked=True)
+            .first()
+        )
+        if job is None:
+            return None
+        job.status = "running"
+        job.started_at = datetime.now(timezone.utc)
+        job.worker_id = _WORKER_ID
+        db.commit()
+        return job
+
+    # SQLite path: single UPDATE is atomic under WAL
+    result = db.execute(
+        text(
+            "UPDATE scan_jobs "
+            "SET status='running', started_at=:ts, worker_id=:wid "
+            "WHERE id = ("
+            "  SELECT id FROM scan_jobs WHERE status='queued' ORDER BY id LIMIT 1"
+            ")"
+        ),
+        {"ts": now_iso, "wid": _WORKER_ID},
+    )
+    db.commit()
+    if result.rowcount == 0:
+        return None
+
+    # Retrieve the row we just updated (our worker_id is the discriminator)
+    job = (
+        db.query(ScanJob)
+        .filter(ScanJob.worker_id == _WORKER_ID, ScanJob.status == "running")
+        .order_by(ScanJob.started_at.desc())
+        .first()
+    )
+    return job
+
+
+def _finish_job(db: Session, job, success: bool, error: str = "") -> None:
+    from app.db.models import ScanJob  # noqa: F811
+    job.status = "done" if success else "failed"
+    job.finished_at = datetime.now(timezone.utc)
+    job.error = error or None
+    db.commit()
+
+
+def _set_scan_status(db: Session, scan_run_id: int, status: str) -> None:
+    db.execute(
+        text("UPDATE scan_runs SET status=:s WHERE id=:id"),
+        {"s": status, "id": scan_run_id},
+    )
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Result-file parsers
+# ---------------------------------------------------------------------------
+
+def _parse_nmap_xml(nmap_xml: Path, scan_run_id: int, sub_map: dict,
+                    domain: str, db: Session) -> int:
+    """Parse nmap XML output and insert PortScan rows. Returns count inserted."""
+    from app.db.models import PortScan
+    inserted = 0
+    tree = ET.parse(str(nmap_xml))
+    root = tree.getroot()
+    for host in root.findall("host"):
+        hostnames = host.find("hostnames")
+        hostname = None
+        if hostnames is not None:
+            for hn in hostnames.findall("hostname"):
+                hostname = hn.get("name")
+                break
+        ip = None
+        for addr in host.findall("address"):
+            if addr.get("addrtype") == "ipv4":
+                ip = addr.get("addr")
+                break
+        ports_elem = host.find("ports")
+        if ports_elem is None:
+            continue
+        for port_elem in ports_elem.findall("port"):
+            state_elem = port_elem.find("state")
+            state = state_elem.get("state", "unknown") if state_elem is not None else "unknown"
+            if state not in ("open", "open|filtered"):
+                continue
+            port_id = int(port_elem.get("portid", 0))
+            protocol = port_elem.get("protocol", "tcp")
+            service_elem = port_elem.find("service")
+            service = version = None
+            if service_elem is not None:
+                service = service_elem.get("name")
+                parts = [service_elem.get("product"), service_elem.get("version")]
+                version = " ".join(p for p in parts if p) or None
+            target_host = hostname or ip or domain
+            sub_id = sub_map.get(target_host) or sub_map.get(domain)
+            if sub_id is None:
+                continue
+            db.add(PortScan(
+                subdomain_id=sub_id, port=port_id, protocol=protocol,
+                state=state, service=service, version=version,
+                scanned_at=datetime.now(timezone.utc),
+            ))
+            inserted += 1
+    return inserted
+
+
+def _parse_nmap_text(nmap_txt: Path, scan_run_id: int, sub_map: dict,
+                     domain: str, db: Session) -> int:
+    """Parse nmap normal-format text output and insert PortScan rows."""
+    from app.db.models import PortScan
+    inserted = 0
+    current_host = domain
+    for raw_line in nmap_txt.read_text(errors="ignore").splitlines():
+        line = raw_line.strip()
+        m = _NMAP_HOST_RE.match(line)
+        if m:
+            current_host = m.group(1).strip()
+            continue
+        m = _NMAP_PORT_RE.match(line)
+        if not m:
+            continue
+        port_id, protocol, state, service, version = (
+            int(m.group(1)), m.group(2), m.group(3), m.group(4), m.group(5)
+        )
+        if state not in ("open", "open|filtered"):
+            continue
+        sub_id = sub_map.get(current_host) or sub_map.get(domain)
+        if sub_id is None:
+            continue
+        db.add(PortScan(
+            subdomain_id=sub_id, port=port_id, protocol=protocol,
+            state=state, service=service if service != "unknown" else None,
+            version=version.strip() if version else None,
+            scanned_at=datetime.now(timezone.utc),
+        ))
+        inserted += 1
+    return inserted
+
+
+def _parse_nuclei(nuclei_file: Path, scan_run_id: int, sub_map: dict,
+                  domain: str, db: Session) -> int:
+    """Parse nuclei JSONL output and insert Vulnerability rows."""
+    from app.db.models import Vulnerability
+    inserted = 0
+    with nuclei_file.open("r", encoding="utf-8", errors="ignore") as fh:
+        for raw in fh:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            info = obj.get("info") or {}
+            title = info.get("name") or obj.get("template-id") or "nuclei finding"
+            sev_str = (info.get("severity") or "info").lower()
+            severity = _SEV_MAP.get(sev_str, 1)
+            host_raw = obj.get("host") or obj.get("matched-at") or domain
+            host = re.sub(r"^https?://", "", host_raw).split("/")[0].split(":")[0]
+            description = (info.get("description") or "")[:2000] or None
+            vuln_type = obj.get("template-id") or "nuclei"
+            sub_id = sub_map.get(host) or sub_map.get(domain)
+            db.add(Vulnerability(
+                scan_run_id=scan_run_id,
+                subdomain_id=sub_id,
+                vuln_type=vuln_type,
+                severity=severity,
+                title=title[:255],
+                description=description,
+                discovered_at=datetime.now(timezone.utc),
+                status="open",
+            ))
+            inserted += 1
+    return inserted
+
+
+def _ingest_results(scan_run_id: int, domain: str, output_dir: Path,
+                    db: Session) -> None:
+    """Parse output files from the scan harness and populate the database.
+
+    Each parsing step is independently wrapped in try/except so a failure
+    in one file never prevents the others from being ingested.
+    """
+    from app.db.models import Subdomain
+
+    sub_map: dict[str, int] = {}  # hostname → Subdomain.id
+
+    # ── Subdomains ────────────────────────────────────────────────────────────
+    subdomain_file = output_dir / "subdomains.txt"
+    if subdomain_file.is_file():
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Parsing subdomains from {subdomain_file.name}")
+            inserted_subs = 0
+            for raw in subdomain_file.read_text(errors="ignore").splitlines():
+                host = re.sub(r"^https?://", "", raw.strip()).split("/")[0].split(":")[0].lower()
+                if not host or " " in host or "." not in host:
+                    continue
+                existing = db.query(Subdomain).filter(
+                    Subdomain.scan_run_id == scan_run_id,
+                    Subdomain.subdomain == host,
+                ).first()
+                if existing:
+                    sub_map[host] = existing.id
+                    continue
+                sub = Subdomain(
+                    scan_run_id=scan_run_id,
+                    subdomain=host,
+                    is_alive=True,
+                    discovered_method="enumeration",
+                    first_seen=datetime.now(timezone.utc),
+                )
+                db.add(sub)
+                db.flush()
+                sub_map[host] = sub.id
+                inserted_subs += 1
+            db.commit()
+            _update_progress(db, scan_run_id, subdomains_found=len(sub_map))
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Subdomains: {inserted_subs} new, {len(sub_map)} total")
+        except Exception as exc:
+            db.rollback()
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] Subdomain parse error: {exc}")
+
+    # Ensure target root domain exists in sub_map
+    root_sub = db.query(Subdomain).filter(
+        Subdomain.scan_run_id == scan_run_id,
+        Subdomain.subdomain == domain,
+    ).first()
+    if root_sub:
+        sub_map[domain] = root_sub.id
+    elif domain not in sub_map:
+        root = Subdomain(
+            scan_run_id=scan_run_id, subdomain=domain, is_alive=True,
+            discovered_method="enumeration", first_seen=datetime.now(timezone.utc),
+        )
+        db.add(root)
+        db.commit()
+        sub_map[domain] = root.id
+
+    # ── Ports (nmap) ─────────────────────────────────────────────────────────
+    nmap_xml = output_dir / "nmap.xml"
+    nmap_txt = output_dir / "nmap.txt"
+    ports_inserted = 0
+    if nmap_xml.is_file():
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Parsing nmap XML: {nmap_xml.name}")
+            ports_inserted = _parse_nmap_xml(nmap_xml, scan_run_id, sub_map, domain, db)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] Nmap XML parse error: {exc}")
+    elif nmap_txt.is_file():
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Parsing nmap text: {nmap_txt.name}")
+            ports_inserted = _parse_nmap_text(nmap_txt, scan_run_id, sub_map, domain, db)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] Nmap text parse error: {exc}")
+    if ports_inserted:
+        _update_progress(db, scan_run_id, ports_found=ports_inserted)
+        _emit_event(db, scan_run_id, "log", "info",
+                    f"[ingestion] Ports: {ports_inserted} inserted")
+
+    # ── Vulnerabilities (nuclei) ──────────────────────────────────────────────
+    for nuclei_file in (output_dir / "nuclei.json", output_dir / "nuclei_results.json"):
+        if not nuclei_file.is_file():
+            continue
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Parsing nuclei results: {nuclei_file.name}")
+            vulns_inserted = _parse_nuclei(nuclei_file, scan_run_id, sub_map, domain, db)
+            db.commit()
+            if vulns_inserted:
+                _update_progress(db, scan_run_id, vulnerabilities_found=vulns_inserted)
+                _emit_event(db, scan_run_id, "log", "info",
+                            f"[ingestion] Findings: {vulns_inserted} inserted")
+        except Exception as exc:
+            db.rollback()
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] Nuclei parse error: {exc}")
+        break  # only process first matching file
+
+
+# ---------------------------------------------------------------------------
+# Scan execution (Blocker B — fail hard if harness absent)
+# ---------------------------------------------------------------------------
+
+def _run_scan(scan_run_id: int, db: Session) -> tuple[bool, str]:
+    """Execute the scan harness, stream output as ScanEvents, return (ok, err).
+
+    Raises FileNotFoundError if the harness script is missing — the worker
+    must not silently succeed when the execution path is invalid.
+    """
+    if not _HARNESS.is_file():
+        raise FileNotFoundError(
+            f"Scan harness not found at {_HARNESS}. "
+            "Ensure lib/run_scan.sh exists and is executable."
+        )
+    if not os.access(_HARNESS, os.X_OK):
+        _HARNESS.chmod(0o755)
+
+    # Fetch scan metadata
+    row = db.execute(
+        text("SELECT domain, scan_type FROM scan_runs WHERE id=:id"),
+        {"id": scan_run_id},
+    ).fetchone()
+    if row is None:
+        return False, f"scan_run {scan_run_id} not found"
+    domain, scan_type = row
+
+    _emit_event(
+        db, scan_run_id, "log", "info",
+        f"Starting scan for {domain} (type={scan_type or 'full'}, "
+        f"worker={_WORKER_ID})"
+    )
+    _update_progress(db, scan_run_id, status="running", current_phase=0,
+                     progress_percentage=5)
+
+    try:
+        proc = subprocess.Popen(
+            [str(_HARNESS), str(scan_run_id), domain, scan_type or "full"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # merge stderr so we capture everything
+            text=True,
+            bufsize=1,  # line-buffered
+        )
+
+        for raw_line in proc.stdout:
+            # Check if scan was stopped via API while running
+            current = db.execute(
+                text("SELECT status FROM scan_runs WHERE id=:id"),
+                {"id": scan_run_id},
+            ).fetchone()
+            if current and current[0] in ("stopped", "failed"):
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                return False, f"scan {current[0]} by request"
+
+            line = raw_line.rstrip()
+            if not line:
+                continue
+
+            # Parse phase hints from harness output e.g. "[phase:2]"
+            phase = None
+            if "[phase:" in line:
+                try:
+                    phase = int(line.split("[phase:")[1].split("]")[0])
+                    pct = min(10 + phase * 20, 90)
+                    _update_progress(db, scan_run_id, current_phase=phase,
+                                     progress_percentage=pct)
+                except (ValueError, IndexError):
+                    pass
+
+            level = "warning" if "[WARN]" in line or "warn" in line.lower() else "info"
+            if "[ERROR]" in line or "error" in line.lower():
+                level = "error"
+
+            _emit_event(db, scan_run_id, "log", level, line, phase=phase)
+
+        try:
+            proc.wait(timeout=3600)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            return False, "scan timed out after 3600 seconds"
+
+        if proc.returncode != 0:
+            return False, f"harness exited with code {proc.returncode}"
+
+        # Ingest output files — failures are non-fatal so wrap tightly
+        output_dir = _OUTPUT_BASE / f"{domain.replace('.', '_')}_{scan_run_id}"
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Starting result ingestion from {output_dir}")
+            _ingest_results(scan_run_id, domain, output_dir, db)
+            _emit_event(db, scan_run_id, "log", "info",
+                        "[ingestion] Result ingestion complete")
+        except Exception as ingest_exc:
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] Non-fatal ingestion error: {ingest_exc}")
+
+        _update_progress(db, scan_run_id, status="done", progress_percentage=100)
+        _emit_event(db, scan_run_id, "completed", "info",
+                    f"Scan finished: domain={domain}")
+        return True, ""
+
+    except FileNotFoundError:
+        raise  # propagate — do not swallow
+    except Exception as exc:
+        return False, str(exc)
+
+
+# ---------------------------------------------------------------------------
+# Main loop
+# ---------------------------------------------------------------------------
+
+def run_once(db: Optional[Session] = None) -> int:
+    """Claim and execute all currently queued jobs.  Returns jobs processed."""
+    own_session = db is None
+    if own_session:
+        db = _Session()
+
+    processed = 0
+    try:
+        while processed < WORKER_MAX_JOBS:
+            job = _claim_job(db)
+            if job is None:
+                break
+
+            scan_run_id = job.scan_run_id
+            logger.info(
+                "job claimed",
+                extra={"job_id": job.id, "scan_run_id": scan_run_id,
+                       "worker": _WORKER_ID},
+            )
+            _set_scan_status(db, scan_run_id, "running")
+
+            try:
+                success, error = _run_scan(scan_run_id, db)
+            except FileNotFoundError as exc:
+                success = False
+                error = str(exc)
+                logger.error(
+                    "harness missing — aborting job",
+                    extra={"job_id": job.id, "error": error},
+                )
+
+            _finish_job(db, job, success, error)
+            # Do not overwrite a stopped status that was set via /stop endpoint
+            current_status_row = db.execute(
+                text("SELECT status FROM scan_runs WHERE id=:id"),
+                {"id": scan_run_id},
+            ).fetchone()
+            if current_status_row and current_status_row[0] not in ("stopped",):
+                final_status = "completed" if success else "failed"
+                _set_scan_status(db, scan_run_id, final_status)
+
+            if not success:
+                _emit_event(db, scan_run_id, "error", "error",
+                            f"Scan failed: {error}")
+                _update_progress(db, scan_run_id, status="failed")
+
+            logger.info(
+                "job finished",
+                extra={"job_id": job.id, "scan_run_id": scan_run_id,
+                       "success": success},
+            )
+            processed += 1
+
+    finally:
+        if own_session:
+            db.close()
+
+    return processed
+
+
+def run_forever() -> None:
+    """Poll the queue indefinitely; auto-restart on unhandled errors."""
+    logger.info("worker started", extra={"worker_id": _WORKER_ID,
+                                          "poll_sec": WORKER_POLL_SEC})
+    while True:
+        try:
+            n = run_once()
+            if n == 0:
+                time.sleep(WORKER_POLL_SEC)
+        except KeyboardInterrupt:
+            logger.info("worker stopping")
+            sys.exit(0)
+        except Exception as exc:
+            logger.error("worker error — will retry",
+                         extra={"error": str(exc)})
+            time.sleep(WORKER_POLL_SEC)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="ReconX scan worker")
+    parser.add_argument(
+        "--drain", action="store_true",
+        help="Process all queued jobs once then exit"
+    )
+    args = parser.parse_args()
+    if args.drain:
+        n = run_once()
+        print(f"Processed {n} job(s).")
+    else:
+        run_forever()
+
+
+# >>> app/workers/__init__.py
+
+"""Worker package — async scan execution and job queue."""
+
+
+# >>> backend/api/server.py
+
+"""Compatibility shim — canonical server is in app/api/server.py."""
+from app.api.server import app  # noqa: F401
+
+
+# >>> backend/api/__init__.py
+
+"""Compatibility shim — canonical implementation is in app.api."""
+from app.api import *  # noqa: F401, F403
+
+
+# >>> backend/api/middleware/auth.py
+
+"""Compatibility shim — canonical implementation is in app.api.middleware.auth."""
+from app.api.middleware.auth import *  # noqa: F401, F403
+
+
+# >>> backend/api/middleware/logging.py
+
+"""Compatibility shim — canonical implementation is in app.api.middleware.logging."""
+from app.api.middleware.logging import *  # noqa: F401, F403
+
+
+# >>> backend/api/middleware/csrf.py
+
+"""Compatibility shim — canonical implementation is in app.api.middleware.csrf."""
+from app.api.middleware.csrf import *  # noqa: F401, F403
+
+
+# >>> backend/api/middleware/__init__.py
+
+"""Compatibility shim — canonical implementation is in app.api.middleware."""
+from app.api.middleware import *  # noqa: F401, F403
+
+
+# >>> backend/api/middleware/rate_limit.py
+
+"""Compatibility shim — canonical implementation is in app.api.middleware.rate_limit."""
+from app.api.middleware.rate_limit import *  # noqa: F401, F403
+
+
+# >>> backend/api/models/finding.py
+
+"""Compatibility shim — canonical implementation is in app.api.models.finding."""
+from app.api.models.finding import *  # noqa: F401, F403
+
+
+# >>> backend/api/models/intel.py
+
+"""Compatibility shim — canonical implementation is in app.api.models.intel."""
+from app.api.models.intel import *  # noqa: F401, F403
+
+
+# >>> backend/api/models/asset.py
+
+"""Compatibility shim — canonical implementation is in app.api.models.asset."""
+from app.api.models.asset import *  # noqa: F401, F403
+
+
+# >>> backend/api/models/__init__.py
+
+"""Compatibility shim — canonical implementation is in app.api.models."""
+from app.api.models import *  # noqa: F401, F403
+
+
+# >>> backend/api/models/common.py
+
+"""Compatibility shim — canonical implementation is in app.api.models.common."""
+from app.api.models.common import *  # noqa: F401, F403
+
+
+# >>> backend/api/models/scan.py
+
+"""Compatibility shim — canonical implementation is in app.api.models.scan."""
+from app.api.models.scan import *  # noqa: F401, F403
+
+
+# >>> backend/api/routes/findings.py
+
+"""Compatibility shim — canonical implementation is in app.api.routes.findings."""
+from app.api.routes.findings import *  # noqa: F401, F403
+
+
+# >>> backend/api/routes/intel.py
+
+"""Compatibility shim — canonical implementation is in app.api.routes.intel."""
+from app.api.routes.intel import *  # noqa: F401, F403
+
+
+# >>> backend/api/routes/__init__.py
+
+"""Compatibility shim — canonical implementation is in app.api.routes."""
+from app.api.routes import *  # noqa: F401, F403
+
+
+# >>> backend/api/routes/stream.py
+
+"""Compatibility shim — canonical implementation is in app.api.routes.stream."""
+from app.api.routes.stream import *  # noqa: F401, F403
+
+
+# >>> backend/api/routes/assets.py
+
+"""Compatibility shim — canonical implementation is in app.api.routes.assets."""
+from app.api.routes.assets import *  # noqa: F401, F403
+
+
+# >>> backend/api/routes/scans.py
+
+"""Compatibility shim — canonical implementation is in app.api.routes.scans."""
+from app.api.routes.scans import *  # noqa: F401, F403
+
+
+# >>> backend/api/routes/reports.py
+
+"""Compatibility shim — canonical implementation is in app.api.routes.reports."""
+from app.api.routes.reports import *  # noqa: F401, F403
+
+
+# >>> backend/api/routes/webhooks.py
+
+"""Compatibility shim — canonical implementation is in app.api.routes.webhooks."""
+from app.api.routes.webhooks import *  # noqa: F401, F403
+
+
+# >>> backend/utils/__init__.py
+
+"""Compatibility shim — canonical implementation is in app.common."""
+from app.common import *  # noqa: F401, F403
+
+
+# >>> backend/utils/logger.py
+
+"""Compatibility shim — canonical implementation is in app.common.logger."""
+from app.common.logger import *  # noqa: F401, F403

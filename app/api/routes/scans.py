@@ -4,7 +4,7 @@ Supports two request styles for scan creation:
   - JSON body: {"domain": "example.com", "scan_type": "full"}  (canonical)
   - Query params: ?target=example.com&phases=1,2,3,4           (legacy UI compat)
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timezone
@@ -96,9 +96,8 @@ def list_scans(
 
 
 @router.post("/", status_code=201, summary="Create scan")
-def create_scan(
-    # JSON body (canonical)
-    req: Optional[ScanCreateRequest] = None,
+async def create_scan(
+    request: Request,
     # Query params (legacy UI compat)
     target: Optional[str] = Query(None, description="Target domain (legacy UI)"),
     phases: Optional[str] = Query(None, description="Comma-separated phases (legacy UI)"),
@@ -111,10 +110,18 @@ def create_scan(
     - POST /scans/ with JSON body {"domain": "...", "scan_type": "..."}
     - POST /scans/?target=example.com&phases=1,2,3  (legacy dashboard format)
     """
-    if req is not None:
-        domain = req.domain
-        scan_type = req.scan_type
-    elif target:
+    domain = None
+    scan_type = "full"
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if isinstance(body, dict) and body.get("domain"):
+            domain = body["domain"]
+            scan_type = body.get("scan_type", "full")
+    if domain is None and target:
         # Legacy query-param format
         from pydantic import ValidationError
         try:
@@ -123,7 +130,7 @@ def create_scan(
             raise HTTPException(status_code=422, detail=str(exc))
         domain = validated.domain
         scan_type = validated.scan_type
-    else:
+    if not domain:
         raise HTTPException(
             status_code=422,
             detail="Either JSON body with 'domain' or query param 'target' is required",

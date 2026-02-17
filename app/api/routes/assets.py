@@ -35,12 +35,19 @@ def asset_stats(target: str, db: Session = Depends(get_db)):
         .first()
     )
     if not scan:
-        return {"target": target, "assets": 0, "vulnerabilities": 0,
+        return {"target": target, "assets": 0, "subdomains": 0, "ports": 0, "vulnerabilities": 0,
                 "critical": 0, "high": 0, "medium": 0, "low": 0}
 
-    assets = db.query(func.count(Subdomain.id)).filter(
+    subdomain_count = db.query(func.count(Subdomain.id)).filter(
         Subdomain.scan_run_id == scan.id
     ).scalar() or 0
+    port_count = (
+        db.query(func.count(PortScan.id))
+        .join(Subdomain, Subdomain.id == PortScan.subdomain_id)
+        .filter(Subdomain.scan_run_id == scan.id, PortScan.state == "open")
+        .scalar()
+        or 0
+    )
 
     vulns = db.query(Vulnerability).filter(Vulnerability.scan_run_id == scan.id).all()
     counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
@@ -55,7 +62,14 @@ def asset_stats(target: str, db: Session = Depends(get_db)):
         else:
             counts["low"] += 1
 
-    return {"target": target, "assets": assets, "vulnerabilities": len(vulns), **counts}
+    return {
+        "target": target,
+        "assets": subdomain_count,
+        "subdomains": subdomain_count,
+        "ports": port_count,
+        "vulnerabilities": len(vulns),
+        **counts,
+    }
 
 
 @router.get("/search", response_model=AssetListResponse, summary="Search assets")
