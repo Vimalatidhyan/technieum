@@ -4,6 +4,7 @@
 # Risk profiling before scanning begins. Does not modify existing phases.
 ################################################################################
 
+set +e
 set -o pipefail
 
 TARGET="$1"

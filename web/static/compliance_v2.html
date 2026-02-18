@@ -99,20 +99,52 @@
     await ensureApiKey();
     initSidebar();
     try {
-      const data = await apiGet('/assets/targets');
-      const targets = data?.targets || [];
-      let totalCritical = 0, totalHigh = 0, totalFindings = 0;
-      for (const t of targets) {
-        const s = await apiGet('/findings/' + encodeURIComponent(t) + '/summary').catch(() => ({}));
-        totalCritical += s?.critical || 0;
-        totalHigh += s?.high || 0;
-        totalFindings += (s?.total || 0);
+      // Try to load real compliance reports from the DB first
+      const reports = await apiGet('/reports/').catch(() => ({ items: [] }));
+      const items = reports?.items || [];
+      const complianceReports = items.filter(r => r.report_type && r.report_type !== 'executive' && r.report_type !== 'technical');
+
+      if (complianceReports.length > 0) {
+        // Real compliance data from phase 8
+        let totalPassed = 0, totalFailed = 0, totalScore = 0, fwCount = 0;
+        const tbody = el('complianceTable');
+        tbody.innerHTML = '';
+        for (const rpt of complianceReports) {
+          const passed = rpt.passed_checks || 0;
+          const failed = rpt.failed_checks || 0;
+          const score = rpt.overall_score != null ? rpt.overall_score : (passed + failed > 0 ? Math.round(passed / (passed + failed) * 100) : 0);
+          const statusClass = score >= 80 ? 'status-completed' : score >= 50 ? 'status-running' : 'status-failed';
+          const statusText = score >= 80 ? 'Passing' : score >= 50 ? 'In Progress' : 'Failing';
+          const date = rpt.generated_at ? new Date(rpt.generated_at).toLocaleDateString() : 'Recent';
+          tbody.innerHTML += '<tr><td><strong>' + (rpt.report_type || 'Unknown').replace(/_/g, ' ').toUpperCase() + '</strong></td>' +
+            '<td><span class="status ' + statusClass + '">' + statusText + '</span></td>' +
+            '<td>' + score + '%</td><td>' + failed + '</td><td class="text-muted">' + date + '</td></tr>';
+          totalPassed += passed;
+          totalFailed += failed;
+          totalScore += score;
+          fwCount++;
+        }
+        el('critGaps').textContent = totalFailed;
+        el('compScore').textContent = (fwCount > 0 ? Math.round(totalScore / fwCount) : 0) + '%';
+        el('checksPassed').textContent = totalPassed + '/' + (totalPassed + totalFailed);
+        el('complianceTable').parentElement.parentElement.querySelector('.stat-value:last-of-type') || (document.querySelectorAll('.stat-value')[3].textContent = fwCount);
+      } else {
+        // Fallback: compute synthetic scores from findings
+        const data = await apiGet('/assets/targets');
+        const targets = data?.targets || [];
+        let totalCritical = 0, totalHigh = 0, totalFindings = 0;
+        for (const t of targets) {
+          const s = await apiGet('/findings/' + encodeURIComponent(t) + '/summary').catch(() => ({}));
+          totalCritical += s?.critical || 0;
+          totalHigh += s?.high || 0;
+          totalFindings += (s?.total || 0);
+        }
+        el('critGaps').textContent = totalCritical;
+        el('owaspGaps').textContent = totalCritical;
+        const score = totalFindings > 0 ? Math.max(0, 100 - (totalCritical * 15 + totalHigh * 5)) : 100;
+        el('compScore').textContent = score + '%';
+        el('checksPassed').textContent = Math.max(0, 10 - totalCritical) + '/10';
       }
-      el('critGaps').textContent = totalCritical;
-      el('owaspGaps').textContent = totalCritical;
-      const score = totalFindings > 0 ? Math.max(0, 100 - (totalCritical * 15 + totalHigh * 5)) : 100;
-      el('compScore').textContent = score + '%';
-      el('checksPassed').textContent = Math.max(0, 10 - totalCritical) + '/10';
     } catch (err) { console.error('Compliance data load failed:', err); }
   });
 

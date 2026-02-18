@@ -548,6 +548,332 @@ def _ingest_results(scan_run_id: int, domain: str, output_dir: Path,
             _emit_event(db, scan_run_id, "log", "warning",
                         f"[ingestion] Feroxbuster parse error ({ferox_file.name}): {exc}")
 
+    # ── Phase 5: Threat Intelligence ─────────────────────────────────────────
+    threat_file = output_dir / "threat_intel_summary.json"
+    if threat_file.is_file():
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        "[ingestion] Parsing threat intel summary")
+            data = json.loads(threat_file.read_text(encoding="utf-8", errors="ignore"))
+            from app.db.models import ThreatIntelData, MalwareIndicator, DataLeak
+            inserted_ti = 0
+
+            # Threat indicators (ip_reputation, domain_reputation, blocklists)
+            for section_key in ("ip_reputation", "domain_reputation", "blocklists",
+                                "indicators", "threat_indicators"):
+                items = data.get(section_key, [])
+                if isinstance(items, dict):
+                    items = [items]
+                for item in (items if isinstance(items, list) else []):
+                    if not isinstance(item, dict):
+                        continue
+                    ind_type = item.get("type") or item.get("indicator_type") or section_key
+                    ind_val = item.get("value") or item.get("indicator") or item.get("ip") or item.get("domain") or ""
+                    if not ind_val:
+                        continue
+                    sev_raw = item.get("severity") or item.get("risk_score") or item.get("confidence_score")
+                    sev = int(sev_raw) if sev_raw and str(sev_raw).isdigit() else None
+                    db.add(ThreatIntelData(
+                        indicator_type=str(ind_type)[:50],
+                        indicator_value=str(ind_val)[:500],
+                        severity=sev,
+                        source=str(item.get("source", "phase5"))[:100],
+                        description=str(item.get("description", ""))[:2000] or None,
+                    ))
+                    inserted_ti += 1
+
+            # Malware indicators (urlhaus, threatfox)
+            for mk in ("malware", "urlhaus", "threatfox", "malware_indicators"):
+                items = data.get(mk, [])
+                if isinstance(items, dict):
+                    items = [items]
+                for item in (items if isinstance(items, list) else []):
+                    if not isinstance(item, dict):
+                        continue
+                    ind_val = item.get("ioc") or item.get("url") or item.get("indicator") or item.get("value") or ""
+                    if not ind_val:
+                        continue
+                    db.add(MalwareIndicator(
+                        scan_run_id=scan_run_id,
+                        indicator_type=str(item.get("type", item.get("ioc_type", "url")))[:50],
+                        indicator_value=str(ind_val)[:500],
+                        malware_family=str(item.get("malware_family", item.get("family", "")))[:100] or None,
+                        verdict=str(item.get("verdict", item.get("threat_type", "")))[:50] or None,
+                        analyzed_by=str(item.get("source", mk))[:100],
+                    ))
+                    inserted_ti += 1
+
+            # Data leaks / breach data
+            for lk in ("data_leaks", "breaches", "breach_monitoring"):
+                items = data.get(lk, [])
+                if isinstance(items, dict):
+                    items = [items]
+                for item in (items if isinstance(items, list) else []):
+                    if not isinstance(item, dict):
+                        continue
+                    email = item.get("email") or item.get("identity") or ""
+                    breach = item.get("breach_name") or item.get("source") or item.get("name") or "unknown"
+                    if not email:
+                        continue
+                    db.add(DataLeak(
+                        scan_run_id=scan_run_id,
+                        email=str(email)[:255],
+                        breach_name=str(breach)[:255],
+                        exposed_data=str(item.get("exposed_data", ""))[:500] or None,
+                        source_url=str(item.get("source_url", ""))[:500] or None,
+                    ))
+                    inserted_ti += 1
+
+            db.commit()
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Threat intel: {inserted_ti} records inserted")
+        except Exception as exc:
+            db.rollback()
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] Threat intel parse error: {exc}")
+
+    # ── Phase 6: CVE Correlation & Risk Scores ───────────────────────────────
+    risk_file = output_dir / "risk_summary.json"
+    cve_file = output_dir / "cve_matches.json"
+    if risk_file.is_file() or cve_file.is_file():
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        "[ingestion] Parsing CVE correlation / risk scores")
+            from app.db.models import RiskScore, VulnerabilityMetadata
+
+            # Risk summary → RiskScore table + ScanRun.risk_score
+            if risk_file.is_file():
+                rdata = json.loads(risk_file.read_text(encoding="utf-8", errors="ignore"))
+                crit = int(rdata.get("critical_count", rdata.get("critical", 0)) or 0)
+                high = int(rdata.get("high_count", rdata.get("high", 0)) or 0)
+                med = int(rdata.get("medium_count", rdata.get("medium", 0)) or 0)
+                low = int(rdata.get("low_count", rdata.get("low", 0)) or 0)
+                overall = int(rdata.get("overall_score", rdata.get("risk_score", 0)) or 0)
+                if overall == 0:
+                    overall = min(100, crit * 20 + high * 10 + med * 3 + low)
+                db.add(RiskScore(
+                    scan_run_id=scan_run_id,
+                    calculation_method=str(rdata.get("method", "weighted"))[:50],
+                    critical_count=crit,
+                    high_count=high,
+                    medium_count=med,
+                    low_count=low,
+                    overall_score=overall,
+                ))
+                # Also update scan_run.risk_score for the scans list UI
+                db.execute(
+                    text("UPDATE scan_runs SET risk_score=:s WHERE id=:id"),
+                    {"s": overall, "id": scan_run_id},
+                )
+                db.commit()
+                _emit_event(db, scan_run_id, "log", "info",
+                            f"[ingestion] Risk score: {overall} (C:{crit} H:{high} M:{med} L:{low})")
+
+            # CVE matches → VulnerabilityMetadata on existing Vulnerability rows
+            if cve_file.is_file():
+                cdata = json.loads(cve_file.read_text(encoding="utf-8", errors="ignore"))
+                cve_items = cdata if isinstance(cdata, list) else cdata.get("matches", cdata.get("cves", []))
+                enriched = 0
+                for item in (cve_items if isinstance(cve_items, list) else []):
+                    if not isinstance(item, dict):
+                        continue
+                    cve_id = item.get("cve_id") or item.get("id") or ""
+                    if not cve_id:
+                        continue
+                    # Try to find matching vulnerability by CVE in title/cve_ids
+                    from app.db.models import Vulnerability
+                    vuln = db.query(Vulnerability).filter(
+                        Vulnerability.scan_run_id == scan_run_id,
+                        Vulnerability.cve_ids.like(f"%{cve_id}%"),
+                    ).first()
+                    if not vuln:
+                        vuln = db.query(Vulnerability).filter(
+                            Vulnerability.scan_run_id == scan_run_id,
+                            Vulnerability.title.like(f"%{cve_id}%"),
+                        ).first()
+                    vuln_id = vuln.id if vuln else None
+                    db.add(VulnerabilityMetadata(
+                        vulnerability_id=vuln_id,
+                        cve_id=str(cve_id)[:50],
+                        cvss_v31_score=float(item.get("cvss", item.get("cvss_score", 0)) or 0) or None,
+                        cvss_v31_vector=str(item.get("cvss_vector", ""))[:100] or None,
+                        epss_score=float(item.get("epss", item.get("epss_score", 0)) or 0) or None,
+                        in_kev=bool(item.get("in_kev", item.get("kev", False))),
+                        has_metasploit=bool(item.get("has_metasploit", False)),
+                        active_exploitation=bool(item.get("active_exploitation", item.get("in_kev", False))),
+                        source=str(item.get("source", "phase6_cve"))[:100],
+                    ))
+                    enriched += 1
+                db.commit()
+                _emit_event(db, scan_run_id, "log", "info",
+                            f"[ingestion] CVE enrichment: {enriched} records")
+        except Exception as exc:
+            db.rollback()
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] CVE/risk parse error: {exc}")
+
+    # ── Phase 7: Change Detection ────────────────────────────────────────────
+    change_file = output_dir / "change_detection_summary.json"
+    delta_file = output_dir / "change_delta.json"
+    if change_file.is_file() or delta_file.is_file():
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        "[ingestion] Parsing change detection data")
+            from app.db.models import AssetSnapshot, BaselineSnapshot
+
+            # Create current asset snapshot
+            from app.db.models import Subdomain as _Sub, PortScan as _PS, Vulnerability as _V
+            sub_count = db.query(_Sub).filter(_Sub.scan_run_id == scan_run_id).count()
+            port_count = db.query(_PS).join(_Sub).filter(_Sub.scan_run_id == scan_run_id).count()
+            vuln_count = db.query(_V).filter(_V.scan_run_id == scan_run_id).count()
+            crit_count = db.query(_V).filter(
+                _V.scan_run_id == scan_run_id, _V.severity >= 90
+            ).count()
+
+            snapshot = AssetSnapshot(
+                scan_run_id=scan_run_id,
+                domain_count=1,
+                subdomain_count=sub_count,
+                open_port_count=port_count,
+                vulnerability_count=vuln_count,
+                critical_vuln_count=crit_count,
+            )
+            db.add(snapshot)
+            db.flush()
+
+            # Create baseline snapshot with change data
+            snap_data = {}
+            if change_file.is_file():
+                snap_data = json.loads(change_file.read_text(encoding="utf-8", errors="ignore"))
+            elif delta_file.is_file():
+                snap_data = json.loads(delta_file.read_text(encoding="utf-8", errors="ignore"))
+
+            db.add(BaselineSnapshot(
+                scan_run_id=scan_run_id,
+                is_baseline=True,
+                asset_count=sub_count + port_count,
+                subdomain_count=sub_count,
+                port_count=port_count,
+                vulnerability_count=vuln_count,
+                risk_score_snapshot=snap_data.get("risk_score", 0) or 0,
+                snapshot_data=json.dumps(snap_data)[:4000] if snap_data else None,
+            ))
+            db.commit()
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Change detection: snapshot created "
+                        f"(subs={sub_count}, ports={port_count}, vulns={vuln_count})")
+        except Exception as exc:
+            db.rollback()
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] Change detection parse error: {exc}")
+
+    # ── Phase 8: Compliance ──────────────────────────────────────────────────
+    compliance_file = output_dir / "compliance_summary.json"
+    if compliance_file.is_file():
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        "[ingestion] Parsing compliance summary")
+            from app.db.models import ComplianceReport, ComplianceFinding
+            cdata = json.loads(compliance_file.read_text(encoding="utf-8", errors="ignore"))
+
+            # Process each framework in the compliance summary
+            frameworks = cdata.get("frameworks", cdata.get("reports", []))
+            if isinstance(frameworks, dict):
+                frameworks = [{"framework": k, **v} for k, v in frameworks.items()]
+            if not frameworks and isinstance(cdata, dict):
+                # Might be a single-framework report
+                if cdata.get("framework") or cdata.get("report_type"):
+                    frameworks = [cdata]
+
+            inserted_cr = 0
+            for fw in (frameworks if isinstance(frameworks, list) else []):
+                if not isinstance(fw, dict):
+                    continue
+                fw_name = fw.get("framework") or fw.get("report_type") or fw.get("name") or "compliance"
+                passed = int(fw.get("passed_checks", fw.get("passed", 0)) or 0)
+                failed = int(fw.get("failed_checks", fw.get("failed", 0)) or 0)
+                score = fw.get("overall_score") or fw.get("score")
+                if score is not None:
+                    score = int(score)
+                elif passed + failed > 0:
+                    score = int((passed / (passed + failed)) * 100)
+
+                report = ComplianceReport(
+                    scan_run_id=scan_run_id,
+                    report_type=str(fw_name)[:50],
+                    passed_checks=passed,
+                    failed_checks=failed,
+                    overall_score=score,
+                )
+                db.add(report)
+                db.flush()
+
+                # Add individual findings
+                findings = fw.get("findings") or fw.get("checks") or fw.get("controls") or []
+                for finding in (findings if isinstance(findings, list) else []):
+                    if not isinstance(finding, dict):
+                        continue
+                    db.add(ComplianceFinding(
+                        report_id=report.id,
+                        requirement_id=str(finding.get("requirement_id", finding.get("id", f"REQ-{inserted_cr}")))[:50],
+                        control_name=str(finding.get("control_name", finding.get("name", finding.get("title", "Unknown"))))[:255],
+                        status=str(finding.get("status", "unknown"))[:20],
+                        evidence=str(finding.get("evidence", ""))[:4000] or None,
+                        remediation=str(finding.get("remediation", ""))[:4000] or None,
+                        severity=str(finding.get("severity", ""))[:20] or None,
+                    ))
+                inserted_cr += 1
+
+            db.commit()
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Compliance: {inserted_cr} framework reports inserted")
+        except Exception as exc:
+            db.rollback()
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] Compliance parse error: {exc}")
+
+    # ── Phase 9: Attack Graph ────────────────────────────────────────────────
+    ag_summary = output_dir / "attack_graph_summary.json"
+    if ag_summary.is_file():
+        try:
+            _emit_event(db, scan_run_id, "log", "info",
+                        "[ingestion] Parsing attack graph summary")
+            agdata = json.loads(ag_summary.read_text(encoding="utf-8", errors="ignore"))
+            nodes = agdata.get("graph_nodes", 0)
+            edges = agdata.get("graph_edges", 0)
+            entry_pts = agdata.get("entry_points", 0)
+            attack_paths = agdata.get("attack_paths", 0)
+            _emit_event(db, scan_run_id, "log", "info",
+                        f"[ingestion] Attack graph: {nodes} nodes, {edges} edges, "
+                        f"{entry_pts} entry points, {attack_paths} attack paths",
+                        data=agdata)
+        except Exception as exc:
+            _emit_event(db, scan_run_id, "log", "warning",
+                        f"[ingestion] Attack graph parse error: {exc}")
+
+    # ── Final: Compute risk score if not set ─────────────────────────────────
+    try:
+        row = db.execute(
+            text("SELECT risk_score FROM scan_runs WHERE id=:id"),
+            {"id": scan_run_id},
+        ).fetchone()
+        if row and not row[0]:
+            from app.db.models import Vulnerability as _V2
+            vulns = db.query(_V2).filter(_V2.scan_run_id == scan_run_id).all()
+            crit = sum(1 for v in vulns if (v.severity or 0) >= 90)
+            high = sum(1 for v in vulns if 70 <= (v.severity or 0) < 90)
+            med = sum(1 for v in vulns if 40 <= (v.severity or 0) < 70)
+            low = sum(1 for v in vulns if 1 <= (v.severity or 0) < 40)
+            score = min(100, crit * 20 + high * 10 + med * 3 + low)
+            if score > 0:
+                db.execute(
+                    text("UPDATE scan_runs SET risk_score=:s WHERE id=:id"),
+                    {"s": score, "id": scan_run_id},
+                )
+                db.commit()
+    except Exception:
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Scan execution (Blocker B — fail hard if harness absent)

@@ -1,9 +1,9 @@
 # ReconX Progress Tracker
 
-## 🎯 Current Status: **BETA - Full Pipeline Functional**
+## 🎯 Current Status: **BETA - Full Pipeline + DB Ingestion**
 
 ```
-██████████████████████████░░ v2.0.2 - 85% Complete
+████████████████████████████░ v2.0.3 - 92% Complete
 ```
 
 ---
@@ -69,6 +69,18 @@
 ✅ **worker.py** - Fixed `_OUTPUT_BASE` to resolve relative to repo root (not CWD); added `cwd=` to Popen so harness runs from correct directory; `completed_at` now set on scan completion/failure/stop
 ✅ **common.sh** - Changed log markers from `[+]/[-]/[!]` to `[INFO]/[ERROR]/[WARN]` so worker correctly classifies log levels in scan_events table
 
+## 🔧 Phase 5-9 DB Ingestion + UI Wiring (v2.0.3)
+
+✅ **worker.py `_ingest_results()`** - Extended to parse and populate DB for all phase 5-9 collated output files:
+  - Phase 5: `threat_intel_summary.json` → `ThreatIntelData`, `MalwareIndicator`, `DataLeak` tables (threat feed, IP/domain reputation, malware IOCs, breach data)
+  - Phase 6: `risk_summary.json` → `RiskScore` table + `ScanRun.risk_score` field; `cve_matches.json` → `VulnerabilityMetadata` table (CVSS, EPSS, KEV enrichment)
+  - Phase 7: `change_detection_summary.json` / `change_delta.json` → `AssetSnapshot` + `BaselineSnapshot` tables (asset change tracking)
+  - Phase 8: `compliance_summary.json` → `ComplianceReport` + `ComplianceFinding` tables (per-framework scores and individual control checks)
+  - Phase 9: `attack_graph_summary.json` → ingested as scan event with graph metadata (node/edge/path counts)
+  - Final fallback: auto-computes `ScanRun.risk_score` from vulnerability severity counts if no Phase 6 score was generated
+✅ **compliance_v2.html** - Wired to fetch real compliance reports from `/api/v1/reports/` API; displays framework names, scores, passed/failed counts, status badges; falls back to synthetic scoring if no reports exist
+✅ **00_prescan.sh** - Added `set +e` to prevent failures from aborting prescan phase
+
 ---
 
 ## 🚀 Ready to Use
@@ -91,12 +103,11 @@ python -m uvicorn api.server:app --host 0.0.0.0 --port 8000
 
 | Task | Priority | Est. Impact |
 |------|----------|-------------|
-| End-to-end scan execution test | 🔴 HIGH | Core feature validation |
-| Worker process + scan queue | 🔴 HIGH | Async job execution |
-| Ubuntu deployment testing | 🔴 HIGH | Production readiness |
+| End-to-end scan execution test on Kali/Ubuntu | 🔴 HIGH | Core feature validation |
+| Ubuntu/Kali deployment testing | 🔴 HIGH | Production readiness |
 | SSL/TLS certificate setup | 🟡 MED | Security hardening |
 | Performance benchmarking | 🟡 MED | Optimization insights |
-| Advanced threat intel integration | 🟢 LOW | Feature enhancement |
+| Report content generation (PDF/HTML) | 🟡 MED | Export functionality |
 
 ---
 
