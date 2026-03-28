@@ -1,6 +1,6 @@
-# ReconX API + Web UI
-# Build: docker build -f deployment/docker/Dockerfile.api -t reconx-api .
-# Run:   docker run -p 8000:8000 -v reconx-data:/app/data reconx-api
+# Technieum API + Web UI
+# Build: docker build -f deployment/docker/Dockerfile.api -t technieum-api .
+# Run:   docker run -p 8000:8000 -v technieum-data:/app/data technieum-api
 
 FROM python:3.11-slim
 
@@ -17,14 +17,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/          ./app/
 COPY web/          ./web/
 COPY config.yaml   .
-COPY reconx.py     .
+COPY technieum.py     .
 COPY query.py      .
 
 # Persistent directories (override with bind-mounts or volumes at runtime)
 RUN mkdir -p /app/data /app/output /app/logs
 
 ENV PYTHONUNBUFFERED=1
-ENV DATABASE_URL=sqlite:////app/data/reconx.db
+ENV DATABASE_URL=sqlite:////app/data/technieum.db
 ENV LOG_LEVEL=INFO
 
 EXPOSE 8000

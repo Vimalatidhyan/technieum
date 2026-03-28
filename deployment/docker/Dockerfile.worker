@@ -1,9 +1,9 @@
-# ReconX Scan Worker
+# Technieum Scan Worker
 # Isolated process that polls the job queue.  Shares the same data volume
 # as the API container but runs in a separate process so runaway scans
 # cannot affect API availability.
 #
-# Build: docker build -f deployment/docker/Dockerfile.worker -t reconx-worker .
+# Build: docker build -f deployment/docker/Dockerfile.worker -t technieum-worker .
 
 FROM python:3.11-slim
 
@@ -26,7 +26,7 @@ COPY config.yaml .
 RUN mkdir -p /app/data /app/output /app/logs
 
 ENV PYTHONUNBUFFERED=1
-ENV DATABASE_URL=sqlite:////app/data/reconx.db
+ENV DATABASE_URL=sqlite:////app/data/technieum.db
 ENV LOG_LEVEL=INFO
 ENV WORKER_POLL_SEC=5
 ENV WORKER_MAX_JOBS=2

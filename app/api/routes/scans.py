@@ -5,12 +5,13 @@ Supports two request styles for scan creation:
   - Query params: ?target=example.com&phases=1,2,3,4           (legacy UI compat)
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timezone
 
 from app.db.database import get_db
-from app.db.models import ScanRun, ScanProgress, ScanJob
+from app.db.models import ScanRun, ScanProgress, ScanJob, ScanEvent
 from app.api.models.scan import ScanCreateRequest, ScanUpdateRequest, ScanResponse, ScanListResponse
 from app.api.models.common import StatusResponse
 
@@ -36,7 +37,18 @@ def _phases_to_scan_type(phases_str: Optional[str]) -> str:
 
 
 def _enqueue(scan: ScanRun, db: Session) -> None:
-    """Create ScanProgress + ScanJob in the same transaction as the caller."""
+    """Create ScanProgress + ScanJob in the same transaction as the caller.
+
+    Defensively removes any pre-existing rows for this scan_run_id before
+    inserting new ones.  This prevents UNIQUE constraint violations when SQLite
+    reuses auto-increment IDs that belonged to previously deleted scans which
+    left orphaned child-table rows (due to the old broken rollback logic).
+    """
+    # Remove stale progress/job rows that may be orphaned from a prior scan
+    # with the same ID (SQLite INTEGER PRIMARY KEY can reuse deleted IDs).
+    db.execute(text("DELETE FROM scan_progress WHERE scan_run_id = :sid"), {"sid": scan.id})
+    db.execute(text("DELETE FROM scan_jobs WHERE scan_run_id = :sid"), {"sid": scan.id})
+
     progress = ScanProgress(scan_run_id=scan.id, status="queued")
     db.add(progress)
     job = ScanJob(
@@ -47,21 +59,50 @@ def _enqueue(scan: ScanRun, db: Session) -> None:
     db.add(job)
 
 
+# Ordered phase names matching shell modules 01-04
+_PHASE_NAMES = [
+    "1_discovery",
+    "2_intel",
+    "3_content",
+    "4_vulnscan",
+]
+
+
+def _build_phases(phase_num: int, status: str) -> dict:
+    """Build a phases dict from the integer phase counter and scan status.
+
+    phase_num indicates how many phases have completed (0-4).
+    For a 'completed' scan with phase=0 (legacy/stuck data) treat all as done.
+    """
+    if status == "completed":
+        # All phases done regardless of stored phase counter
+        return {name: True for name in _PHASE_NAMES}
+    if status == "failed":
+        return {name: (i < phase_num) for i, name in enumerate(_PHASE_NAMES)}
+    # running / queued — phases up to phase_num-1 are done, rest are pending
+    return {name: (i < phase_num) for i, name in enumerate(_PHASE_NAMES)}
+
+
 def _scan_to_dict(scan: ScanRun) -> dict:
     """Return scan data including legacy field aliases expected by the UI."""
+    phase_num = scan.phase or 0
+    status = scan.status or "queued"
+    # For completed scans that have stale phase=0, report phase as 4
+    display_phase = 4 if status == "completed" else phase_num
+    phases = _build_phases(phase_num, status)
     return {
         "id": scan.id,
         "scan_id": str(scan.id),          # legacy alias used by dashboard-v2.js
         "domain": scan.domain,
         "target": scan.domain,            # legacy alias used by dashboard-v2.js
         "scan_type": scan.scan_type,
-        "status": scan.status,
+        "status": status,
         "risk_score": scan.risk_score,
-        "phase": scan.phase,
+        "phase": display_phase,
         "started_at": scan.created_at.isoformat() if scan.created_at else None,
         "created_at": scan.created_at.isoformat() if scan.created_at else None,
         "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
-        "phases": {},   # populated below for quick compat
+        "phases": phases,
     }
 
 
@@ -104,6 +145,12 @@ async def create_scan(
     test_mode: Optional[bool] = Query(False, description="Test mode flag (legacy UI)"),
     db: Session = Depends(get_db),
 ):
+    # Safety guard: test_mode only works when explicitly enabled via the
+    # TECHNIEUM_TEST_MODE=1 environment variable.  This prevents accidental
+    # use of mock data through a stale UI checkbox / localStorage value.
+    import os as _os
+    if test_mode and not _os.environ.get("TECHNIEUM_TEST_MODE", "").strip() in ("1", "true", "yes"):
+        test_mode = False
     """Create a new scan.
 
     Accepts either:
@@ -135,6 +182,46 @@ async def create_scan(
             status_code=422,
             detail="Either JSON body with 'domain' or query param 'target' is required",
         )
+
+    if test_mode:
+        # Test mode: create a scan and immediately mark it completed with
+        # realistic-looking mock data so the UI can show results instantly
+        # without running real tools.
+        scan = ScanRun(domain=domain, scan_type=scan_type, status="completed",
+                       phase=4, risk_score=42)
+        db.add(scan)
+        db.flush()
+        # Insert mock progress so the detail panel renders correctly
+        db.execute(text("DELETE FROM scan_progress WHERE scan_run_id = :sid"), {"sid": scan.id})
+        progress = ScanProgress(
+            scan_run_id=scan.id,
+            status="completed",
+            current_phase=4,
+            progress_percentage=100,
+            subdomains_found=12,
+            ports_found=8,
+            vulnerabilities_found=3,
+        )
+        db.add(progress)
+        for msg in [
+            "[test] Scan started in test-mode (mock data)",
+            "[test] Discovery phase complete — 12 subdomains found",
+            "[test] Intel phase complete",
+            "[test] Content phase complete",
+            "[test] Vulnerability scan complete — 3 findings",
+            "[test] Scan finished successfully",
+        ]:
+            db.add(ScanEvent(
+                scan_run_id=scan.id,
+                event_type="log",
+                level="info",
+                message=msg,
+                phase=4,
+                created_at=datetime.now(timezone.utc),
+            ))
+        db.commit()
+        db.refresh(scan)
+        return _scan_to_dict(scan)
 
     scan = ScanRun(domain=domain, scan_type=scan_type, status="queued")
     db.add(scan)
@@ -176,6 +263,67 @@ def delete_scan(scan_id: int, db: Session = Depends(get_db)):
     scan = db.query(ScanRun).filter(ScanRun.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
+
+    # Bulk-delete every child table via raw SQL so we never rely on ORM
+    # cascade or SQLite FK enforcement (which is off by default).
+    # Tables are ordered so grandchildren are deleted before parents.
+    #
+    # NOTE: compliance_findings uses report_id (FK → compliance_reports.id),
+    #       not scan_run_id, so it must be handled via a subquery.
+    #       audit_logs has no scan_run_id column (standalone table) — skip it.
+    _child_tables = [
+        "scan_events",
+        "scan_jobs",
+        "scan_progress",
+        "baseline_snapshots",
+        "malware_indicators",
+        "data_leaks",
+        "compliance_reports",
+        "asset_snapshots",
+        "risk_scores",
+        "threat_intel_data",
+        "isp_locations",
+        "dns_records",
+        "domain_technologies",
+        "vulnerability_metadata",
+        "vulnerabilities",
+        "http_headers",
+        "port_scans",
+        "subdomains",
+        "scan_runner_metadata",
+        "saved_reports",
+    ]
+
+    # Delete compliance evidence/findings via subquery
+    # (their FKs point to compliance_reports.id, not scan_run_id directly)
+    for _subq_table, _subq_col, _subq_parent in [
+        ("compliance_evidence",  "compliance_report_id", "compliance_reports"),
+        ("compliance_findings",  "report_id",            "compliance_reports"),
+    ]:
+        try:
+            db.execute(text("SAVEPOINT sp_subq"))
+            db.execute(
+                text(
+                    f"DELETE FROM {_subq_table}"
+                    f" WHERE {_subq_col} IN"
+                    f" (SELECT id FROM {_subq_parent} WHERE scan_run_id = :sid)"
+                ),
+                {"sid": scan_id},
+            )
+            db.execute(text("RELEASE SAVEPOINT sp_subq"))
+        except Exception:
+            db.execute(text("ROLLBACK TO SAVEPOINT sp_subq"))
+
+    for table in _child_tables:
+        try:
+            db.execute(text("SAVEPOINT sp_del"))
+            db.execute(text(f"DELETE FROM {table} WHERE scan_run_id = :sid"), {"sid": scan_id})
+            db.execute(text("RELEASE SAVEPOINT sp_del"))
+        except Exception:
+            # Table may not exist yet (schema evolution) — roll back only this
+            # single statement so prior deletes in the transaction are preserved.
+            db.execute(text("ROLLBACK TO SAVEPOINT sp_del"))
+
     db.delete(scan)
     db.commit()
     return StatusResponse(status="deleted", message=f"Scan {scan_id} deleted")
@@ -183,27 +331,57 @@ def delete_scan(scan_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{scan_id}/start", response_model=StatusResponse, summary="Start scan")
 def start_scan(scan_id: int, db: Session = Depends(get_db)):
-    """Enqueue a scan job. Idempotent — won't create duplicate active jobs."""
+    """Enqueue a scan job (or re-enqueue a completed/failed/stopped scan).
+
+    Resets all transient state so the UI starts fresh:
+    - Clears old scan_events (mock events from test_mode or previous run logs)
+    - Resets scan_progress to queued with 0%
+    - Resets scan.phase, completed_at, risk_score
+    - Creates a new ScanJob unless one is already active
+    """
     scan = db.query(ScanRun).filter(ScanRun.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
     if scan.status == "running":
         raise HTTPException(status_code=400, detail="Scan already running")
 
-    active_job = (
-        db.query(ScanJob)
-        .filter(
-            ScanJob.scan_run_id == scan_id,
-            ScanJob.status.in_(["queued", "running"]),
-        )
-        .first()
+    # ── Reset scan metadata so UI shows a fresh run ──
+    scan.phase = 0
+    scan.completed_at = None
+    scan.risk_score = None
+
+    # ── Clear old log events so the log stream starts empty ──
+    db.execute(
+        text("DELETE FROM scan_events WHERE scan_run_id = :sid"),
+        {"sid": scan_id},
     )
-    if not active_job:
-        db.add(ScanJob(
-            scan_run_id=scan_id,
-            status="queued",
-            queued_at=datetime.now(timezone.utc),
-        ))
+
+    # ── Reset progress record so progress bar shows 0% / queued ──
+    db.execute(
+        text("DELETE FROM scan_progress WHERE scan_run_id = :sid"),
+        {"sid": scan_id},
+    )
+    db.add(ScanProgress(
+        scan_run_id=scan_id,
+        status="queued",
+        current_phase=0,
+        progress_percentage=0,
+    ))
+
+    # ── Mark any stale jobs as superseded so worker ignores them ──
+    db.execute(
+        text(
+            "UPDATE scan_jobs SET status='superseded'"
+            " WHERE scan_run_id = :sid AND status IN ('queued','running','done','failed','stopped')"
+        ),
+        {"sid": scan_id},
+    )
+
+    db.add(ScanJob(
+        scan_run_id=scan_id,
+        status="queued",
+        queued_at=datetime.now(timezone.utc),
+    ))
 
     scan.status = "queued"
     db.commit()
